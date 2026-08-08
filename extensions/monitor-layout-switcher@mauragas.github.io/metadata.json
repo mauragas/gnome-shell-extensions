@@ -1,0 +1,8 @@
+{
+    "uuid": "monitor-layout-switcher@mauragas.github.io",
+    "name": "Monitor Layout Switcher",
+    "description": "Visually switch between saved multi-monitor layouts from the top bar",
+    "shell-version": ["46", "47", "48"],
+    "settings-schema": "org.gnome.shell.extensions.monitor-layout-switcher",
+    "url": "https://github.com/mauragas/gnome-shell-extensions/tree/main/extensions/monitor-layout-switcher@mauragas.github.io"
+}

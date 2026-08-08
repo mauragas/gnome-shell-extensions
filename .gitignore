@@ -1,0 +1,15 @@
+# Generated GNOME Shell / GLib artifacts
+**/schemas/gschemas.compiled
+**/*.zip
+
+# Logs and temp files
+*.log
+*.tmp
+*.temp
+
+# Editor and OS cruft
+*~
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
