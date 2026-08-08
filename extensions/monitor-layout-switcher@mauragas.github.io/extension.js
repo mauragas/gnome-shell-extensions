@@ -25,9 +25,7 @@ const CURRENT_PREVIEW_WIDTH = 180;
 const CURRENT_PREVIEW_HEIGHT = 100;
 const PREVIEW_PADDING = 6;
 const MONITOR_GAP = 2;
-const RECENT_LAYOUTS_LIMIT = 2;
 const TOGGLE_LAST_TWO_LAYOUTS_KEY = 'toggle-last-two-layouts';
-const HISTORY_TRANSITION_TIMEOUT_US = 5 * 1000 * 1000;
 const SWITCHER_CYCLE_DEDUP_WINDOW_US = 100 * 1000;
 const SWITCHER_SUPER_RELEASE_POLL_MS = 50;
 const SWITCHER_HINT_TEXT =
@@ -326,76 +324,6 @@ function isSuperKey(keysym) {
     return keysym === Clutter.KEY_Super_L || keysym === Clutter.KEY_Super_R;
 }
 
-function findFallbackToggleTarget(layouts, matchedLayout) {
-    if (!matchedLayout)
-        return null;
-
-    for (const layout of layouts) {
-        if (layout !== matchedLayout)
-            return layout;
-    }
-
-    return null;
-}
-
-function normalizeMonitorState(mon) {
-    return {
-        connector: mon.connector ?? '',
-        model: mon.model ?? '',
-        mode: mon.mode ?? '',
-        transform: mon.transform ?? 0,
-        scale: mon.scale ?? 1,
-        x: mon.x ?? 0,
-        y: mon.y ?? 0,
-        isPrimary: !!mon.isPrimary,
-        isBuiltin: !!mon.isBuiltin,
-    };
-}
-
-function monitorSortKey(mon) {
-    return [
-        mon.connector,
-        mon.model,
-        mon.mode,
-        String(mon.transform),
-        String(mon.scale),
-        String(mon.x),
-        String(mon.y),
-        mon.isPrimary ? '1' : '0',
-        mon.isBuiltin ? '1' : '0',
-    ].join('\u0000');
-}
-
-function monitorStateSignature(monitors) {
-    const normalized = monitors
-        .map(normalizeMonitorState)
-        .sort((a, b) => monitorSortKey(a).localeCompare(monitorSortKey(b)));
-
-    return JSON.stringify(normalized);
-}
-
-function cloneMonitors(monitors) {
-    return monitors.map(mon => ({...mon}));
-}
-
-function createHistoryEntry(name, monitors) {
-    if (!Array.isArray(monitors) || monitors.length === 0)
-        return null;
-
-    return {
-        signature: monitorStateSignature(monitors),
-        name: name ?? 'Current Layout',
-        monitors: cloneMonitors(monitors),
-    };
-}
-
-function historyEntryFromState(state, matchedLayout = null) {
-    return createHistoryEntry(
-        matchedLayout?.name ?? 'Current Layout',
-        currentMonitorsFromState(state)
-    );
-}
-
 function resolveLayoutMonitors(layoutMonitors, stateMonitors) {
     const connMap = resolveConnectors(layoutMonitors, stateMonitors);
     const resolvedMonitors = [];
@@ -430,10 +358,7 @@ export default class MonitorLayoutSwitcher extends Extension {
     enable() {
         this._settings = this.getSettings(
             'org.gnome.shell.extensions.monitor-layout-switcher');
-        this._recentLayouts = [];
-        this._toggleBusy = false;
         this._keybindingRegistered = false;
-        this._pendingHistoryTarget = null;
         this._switcherOverlay = null;
         this._switcherModalGrab = null;
         this._switcherSuperReleaseWatchId = 0;
@@ -509,11 +434,8 @@ export default class MonitorLayoutSwitcher extends Extension {
             Main.wm.removeKeybinding(TOGGLE_LAST_TWO_LAYOUTS_KEY);
             this._keybindingRegistered = false;
         }
-        this._recentLayouts = [];
-        this._pendingHistoryTarget = null;
         this._switcherOpening = false;
         this._switcherApplyInProgress = false;
-        this._toggleBusy = false;
         this._settings = null;
         this._indicator?.destroy();
         this._indicator = null;
@@ -579,7 +501,6 @@ export default class MonitorLayoutSwitcher extends Extension {
             try {
                 const state = await getCurrentState();
                 matchedLayout = findMatchingLayout(layouts, state);
-                this._rememberLayoutState(state, matchedLayout);
             } catch (e) {
                 console.error(`[MLS] switcher state lookup failed: ${e.message}`);
             }
@@ -912,97 +833,6 @@ export default class MonitorLayoutSwitcher extends Extension {
         return Clutter.EVENT_PROPAGATE;
     }
 
-    _updateRecentLayouts(primaryEntry, secondaryEntry = null) {
-        const next = [];
-
-        for (const entry of [primaryEntry, secondaryEntry, ...(this._recentLayouts ?? [])]) {
-            if (!entry)
-                continue;
-            if (next.some(item => item.signature === entry.signature))
-                continue;
-
-            next.push(entry);
-            if (next.length >= RECENT_LAYOUTS_LIMIT)
-                break;
-        }
-
-        this._recentLayouts = next;
-    }
-
-    _setPendingHistoryTarget(entry) {
-        this._pendingHistoryTarget = entry
-            ? {
-                entry,
-                expiresAtUs: GLib.get_monotonic_time() + HISTORY_TRANSITION_TIMEOUT_US,
-            }
-            : null;
-    }
-
-    _rememberLayoutState(state, matchedLayout = null) {
-        let entry = historyEntryFromState(state, matchedLayout);
-        if (!entry)
-            return null;
-
-        const pending = this._pendingHistoryTarget;
-        if (pending) {
-            if (GLib.get_monotonic_time() > pending.expiresAtUs) {
-                this._pendingHistoryTarget = null;
-            } else if (entry.signature === pending.entry.signature) {
-                entry = pending.entry;
-                this._pendingHistoryTarget = null;
-            } else {
-                return entry;
-            }
-        }
-
-        this._updateRecentLayouts(entry);
-
-        return entry;
-    }
-
-    async _toggleLastTwoLayouts() {
-        if (this._toggleBusy)
-            return;
-
-        this._toggleBusy = true;
-
-        try {
-            const state = await getCurrentState();
-            const layouts = loadLayouts(this._settings);
-            const matchedLayout = findMatchingLayout(
-                layouts,
-                state
-            );
-            const currentEntry = this._rememberLayoutState(state, matchedLayout);
-
-            let target = currentEntry
-                ? this._recentLayouts.find(entry =>
-                    entry.signature !== currentEntry.signature)
-                : null;
-            if (!target)
-                target = findFallbackToggleTarget(layouts, matchedLayout);
-
-            if (!target) {
-                Main.notify('Monitor Layout',
-                    'Use two different monitor layouts before toggling');
-                return;
-            }
-
-            const successMessage = target.name === 'Current Layout'
-                ? 'Switched to previous monitor layout'
-                : `Switched to ${target.name}`;
-            await this._applyLayout(target, {
-                successMessage,
-                historyPreviousEntry: currentEntry,
-            });
-        } catch (e) {
-            console.error(`[MLS] toggle failed: ${e.message}`);
-            Main.notify('Monitor Layout', `Error: ${e.message}`);
-        } finally {
-            this._toggleBusy = false;
-        }
-    }
-
     async _buildMenu() {
         this._buildSeq = (this._buildSeq ?? 0) + 1;
         const seq = this._buildSeq;
@@ -1027,8 +857,6 @@ export default class MonitorLayoutSwitcher extends Extension {
         const matchedLayout = currentState
             ? findMatchingLayout(layouts, currentState)
             : null;
-        if (currentState)
-            this._rememberLayoutState(currentState, matchedLayout);
 
         const currentItem = new PopupMenu.PopupBaseMenuItem({
             reactive: false, can_focus: false,
@@ -1159,29 +987,15 @@ export default class MonitorLayoutSwitcher extends Extension {
     }
 
     async _applyLayout(layout, options = {}) {
-        const {
-            successMessage = layout.name,
-            historyPreviousEntry = null,
-        } = options;
+        const {successMessage = layout.name} = options;
 
         if (!Array.isArray(layout.monitors) || layout.monitors.length === 0) {
             Main.notify('Monitor Layout', 'Layout has no monitors');
             return false;
         }
 
-        let historyBeforeTarget = [...(this._recentLayouts ?? [])];
-
         try {
-            this._setPendingHistoryTarget(null);
             const state = await getCurrentState();
-            const previousMatchedLayout = findMatchingLayout(
-                loadLayouts(this._settings),
-                state
-            );
-            const previousEntry = historyPreviousEntry
-                ?? this._rememberLayoutState(state, previousMatchedLayout);
-            historyBeforeTarget = [...(this._recentLayouts ?? [])];
-
             const resolvedLayout = resolveLayoutMonitors(
                 layout.monitors,
                 state.monitors
@@ -1190,13 +1004,6 @@ export default class MonitorLayoutSwitcher extends Extension {
                 Main.notify('Monitor Layout', resolvedLayout.error);
                 return false;
             }
-
-            const targetEntry = createHistoryEntry(
-                layout.name ?? 'Current Layout',
-                resolvedLayout.monitors
-            );
-            this._setPendingHistoryTarget(targetEntry);
-            this._updateRecentLayouts(targetEntry, previousEntry);
 
             const logicals = resolvedLayout.monitors.map(lm =>
                 makeLogicalMonitor(
@@ -1210,8 +1017,6 @@ export default class MonitorLayoutSwitcher extends Extension {
                 Main.notify('Monitor Layout', successMessage);
             return true;
         } catch (e) {
-            this._setPendingHistoryTarget(null);
-            this._recentLayouts = historyBeforeTarget;
             console.error(`[MLS] apply failed: ${e.message}`);
             Main.notify('Monitor Layout', `Error: ${e.message}`);
             return false;

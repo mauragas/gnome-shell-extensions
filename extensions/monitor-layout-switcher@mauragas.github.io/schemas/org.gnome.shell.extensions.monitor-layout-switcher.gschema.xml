@@ -27,9 +27,9 @@
     </key>
 
     <key name="toggle-last-two-layouts" type="as">
-      <default>["&lt;Super&gt;F7"]</default>
-      <summary>Toggle between the last two monitor layouts</summary>
-      <description>Keyboard shortcut used to switch back to the previous distinct monitor layout seen during the current session.</description>
+      <default>['&lt;Super&gt;F7']</default>
+      <summary>Open the monitor layout switcher</summary>
+      <description>Keyboard shortcut used to open the layout switcher overlay, cycle through saved layouts, and apply the selected layout.</description>
     </key>
 
   </schema>

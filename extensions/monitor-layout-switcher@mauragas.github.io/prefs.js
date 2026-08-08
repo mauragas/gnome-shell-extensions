@@ -1,6 +1,5 @@
 import Adw from 'gi://Adw';
 import Gtk from 'gi://Gtk';
-import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 
 import {ExtensionPreferences}
