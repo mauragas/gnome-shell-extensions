@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.monitor-layout-switcher"
+          path="/org/gnome/shell/extensions/monitor-layout-switcher/">
+
+    <!-- JSON array of layout objects. Each layout:
+         {
+           "id": "unique-id",
+           "name": "Human Label",
+           "monitors": [
+             {
+               "connector": "&lt;connector-name&gt;",
+               "mode": "&lt;mode-id&gt;",
+               "transform": 0,
+               "scale": 1.0,
+               "x": 0,
+               "y": 0,
+               "isPrimary": true
+             }
+           ]
+         }
+    -->
+    <key name="layouts" type="s">
+      <default>''</default>
+      <summary>Saved monitor layouts</summary>
+      <description>JSON array of layout configurations</description>
+    </key>
+
+    <key name="toggle-last-two-layouts" type="as">
+      <default>["&lt;Super&gt;F7"]</default>
+      <summary>Toggle between the last two monitor layouts</summary>
+      <description>Keyboard shortcut used to switch back to the previous distinct monitor layout seen during the current session.</description>
+    </key>
+
+  </schema>
+</schemalist>
