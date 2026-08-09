@@ -1,0 +1,208 @@
+/* Razer Keyboard RGB Control */
+
+.rrc-menu-status {
+    padding: 8px 12px 6px;
+}
+
+.rrc-status-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.96);
+}
+
+.rrc-status-subtitle {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.82);
+}
+
+.rrc-status-note {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.62);
+}
+
+.rrc-status-error {
+    font-size: 11px;
+    color: rgba(255, 159, 159, 0.95);
+}
+
+.rrc-menu-section {
+    padding: 4px 12px 8px;
+}
+
+.rrc-section-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.7);
+    text-transform: uppercase;
+}
+
+.rrc-chip-button {
+    border-radius: 999px;
+    padding: 6px 12px;
+    background-color: rgba(0, 0, 0, 0.26);
+    color: rgba(255, 255, 255, 0.96);
+    transition-duration: 150ms;
+}
+
+.rrc-chip-button:hover {
+    background-color: rgba(255, 255, 255, 0.16);
+}
+
+.rrc-chip-button-active {
+    background-color: rgba(90, 198, 124, 0.22);
+    border: 1px solid rgba(90, 198, 124, 0.82);
+}
+
+.rrc-color-chip-button {
+    min-width: 64px;
+    border-radius: 999px;
+    padding: 6px 12px;
+    transition-duration: 150ms;
+}
+
+.rrc-color-chip-button-active {
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+.rrc-chip-label {
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.rrc-virtual-key-label {
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.rrc-custom-row {
+    padding-top: 2px;
+}
+
+.rrc-custom-slider-bin {
+    min-width: 180px;
+    padding: 0 4px;
+}
+
+.rrc-hue-slider {
+    color: rgba(255, 255, 255, 0.96);
+}
+
+.rrc-custom-hex {
+    min-width: 72px;
+    font-size: 11px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.72);
+}
+
+.rrc-mode-editor {
+    padding-top: 2px;
+}
+
+.rrc-virtual-keyboard {
+    padding: 8px;
+    border-radius: 10px;
+    background-color: rgba(0, 0, 0, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.rrc-virtual-keyboard-row {
+    padding: 0;
+}
+
+.rrc-virtual-key {
+    transition-duration: 120ms;
+}
+
+.rrc-virtual-key:hover {
+    filter: brightness(1.08);
+}
+
+.rrc-virtual-key-selected {
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.rrc-overlay-backdrop {
+    background-color: rgba(0, 0, 0, 0.42);
+}
+
+.rrc-overlay-panel {
+    padding: 20px 22px;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background-color: rgba(24, 24, 28, 0.97);
+    box-shadow: 0 16px 38px rgba(0, 0, 0, 0.36);
+}
+
+.rrc-overlay-title {
+    font-size: 17px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.97);
+}
+
+.rrc-overlay-subtitle {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.68);
+}
+
+.rrc-device-card {
+    min-width: 300px;
+    padding: 14px;
+    border-radius: 12px;
+    background-color: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.rrc-device-card-unavailable {
+    background-color: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.rrc-device-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.rrc-device-subtitle {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.62);
+}
+
+.rrc-device-note {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.56);
+}
+
+.rrc-card-status {
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.rrc-card-status-ok {
+    background-color: rgba(143, 233, 171, 0.92);
+    color: rgba(18, 54, 28, 0.98);
+}
+
+.rrc-card-status-warning {
+    background-color: rgba(255, 214, 138, 0.94);
+    color: rgba(78, 44, 9, 0.98);
+}
+
+.rrc-actions-row {
+    padding-top: 4px;
+}
+
+.rrc-footer-button {
+    border-radius: 8px;
+    padding: 8px 14px;
+    background-color: rgba(0, 0, 0, 0.26);
+    color: rgba(255, 255, 255, 0.96);
+    transition-duration: 150ms;
+}
+
+.rrc-footer-button:hover {
+    background-color: rgba(255, 255, 255, 0.16);
+}
