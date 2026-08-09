@@ -4,7 +4,7 @@ A GNOME Shell extension that adds a **panel indicator** to the top bar for visua
 
 A native GNOME Shell extension built with GJS and the Mutter `DisplayConfig` DBus API.
 
-This extension is stored in this repository at [`extensions/monitor-layout-switcher@mauragas.github.io/`](.).
+This extension is stored in this repository at [`extensions/monitor-layout-switcher/`](.).
 
 - Source: [github.com/mauragas/gnome-shell-extensions](https://github.com/mauragas/gnome-shell-extensions)
 - Issue tracker: [github.com/mauragas/gnome-shell-extensions/issues](https://github.com/mauragas/gnome-shell-extensions/issues)
@@ -49,6 +49,7 @@ The install script:
 
 1. Creates a symlink from `~/.local/share/gnome-shell/extensions/` to this source folder
 2. Compiles the GSettings schemas
+3. Attempts to enable the renamed UUID immediately, or queues it for the next login if GNOME Shell has not discovered it yet
 
 After installing, restart GNOME Shell and enable the extension:
 
@@ -57,8 +58,11 @@ After installing, restart GNOME Shell and enable the extension:
 dbus-run-session gnome-shell --nested --wayland
 
 # Enable
-gnome-extensions enable monitor-layout-switcher@mauragas.github.io
+gnome-extensions enable monitor-layout-switcher
 ```
+
+If you previously installed an older suffixed UUID variant, rerun
+`./install.sh` so GNOME discovers the renamed extension UUID.
 
 ## Configuration
 
@@ -80,7 +84,7 @@ The chooser always places the current saved layout first, then keeps the rest in
 You can manage saved layouts from the preferences window:
 
 ```bash
-gnome-extensions prefs monitor-layout-switcher@mauragas.github.io
+gnome-extensions prefs monitor-layout-switcher
 ```
 
 ## File Structure

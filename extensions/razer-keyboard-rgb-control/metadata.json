@@ -1,0 +1,8 @@
+{
+    "uuid": "razer-keyboard-rgb-control",
+    "name": "Razer Keyboard RGB Control",
+    "description": "Control supported Razer keyboard RGB lighting from the GNOME Shell top bar.",
+    "shell-version": ["46", "47", "48"],
+    "settings-schema": "org.gnome.shell.extensions.razer-keyboard-rgb-control",
+    "url": "https://github.com/mauragas/gnome-shell-extensions/tree/main/extensions/razer-keyboard-rgb-control"
+}

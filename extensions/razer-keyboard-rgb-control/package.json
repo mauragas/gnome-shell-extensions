@@ -1,0 +1,10 @@
+{
+  "name": "razer-keyboard-rgb-control-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "test:live": "RRC_REAL_DEVICE_TESTS=1 node --test tests/live.integration.test.js",
+    "test:ui-live": "RRC_REAL_UI_TESTS=1 node --test tests/ui.live.integration.test.js"
+  }
+}

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.razer-keyboard-rgb-control"
+          path="/org/gnome/shell/extensions/razer-keyboard-rgb-control/">
+
+    <key name="last-preset" type="s">
+      <default>''</default>
+      <summary>Last applied keyboard preset</summary>
+      <description>Stores the last keyboard lighting selection that was applied from the extension UI.</description>
+    </key>
+
+    <key name="custom-mode-layouts" type="s">
+      <default>''</default>
+      <summary>Saved custom mode layouts</summary>
+      <description>Stores editable per-key RGB matrices for the built-in programmer modes.</description>
+    </key>
+
+  </schema>
+</schemalist>
