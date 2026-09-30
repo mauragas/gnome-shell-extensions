@@ -1,0 +1,23 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "RRC unit tests",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"test"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "RRC node --test",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test"
+			],
+			"problemMatcher": []
+		}
+	]
+}

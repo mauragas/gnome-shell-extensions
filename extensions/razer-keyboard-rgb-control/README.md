@@ -13,6 +13,7 @@ This extension is stored in this repository at [`extensions/razer-keyboard-rgb-c
 - Top-bar presets for static colors, custom hue, effects, and brightness
 - A larger control-pad overlay with programmer modes and a per-key mode editor
 - Saved keyboard lighting restore after login, reconnect, or extension reload
+- Boot-time lighting restore before login, via a `systemd --user` service
 - Background recovery when the keyboard is present on USB but missing from the `OpenRazer` session D-Bus state
 - A GNOME-session test bridge for live UI smoke checks
 
@@ -85,6 +86,36 @@ Before installing the extension, set up `OpenRazer` for your current user.
    gnome-extensions enable razer-keyboard-rgb-control
    ```
 
+## Restore lighting before login
+
+A GNOME Shell extension cannot run before the graphical session exists, so the
+installer also sets up a small `systemd --user` service that applies the saved
+preset from a headless GJS script.
+
+`install.sh` will:
+
+- enable user lingering (`loginctl enable-linger "$USER"`) so the user session
+  and `openrazer-daemon` start at boot, before any graphical login
+- install `razer-keyboard-rgb-restore.service` into `~/.config/systemd/user/`
+- enable that service so it runs at every boot
+
+Manage it with:
+
+```bash
+systemctl --user status razer-keyboard-rgb-restore.service
+journalctl --user -u razer-keyboard-rgb-restore.service
+systemctl --user start razer-keyboard-rgb-restore.service
+```
+
+The service applies whatever preset is currently saved by the extension (the
+`last-preset` GSettings key plus the saved custom mode layouts), so the same
+lighting returns after a reboot even before you log in. Enable lingering
+requires no root for your own user, but if the automatic step fails, run:
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
 ## Verify manually
 
 1. Open the panel indicator.
@@ -150,14 +181,26 @@ so shared logs and snapshots do not expose local hardware identifiers.
 
 The extension polls for a missing keyboard and can restart `openrazer-daemon` when the device is visible on USB but not exposed on the session bus yet. If recovery still fails, restart the daemon manually and reopen the menu.
 
+### Lighting is not restored before login
+
+- Confirm user lingering is enabled: `loginctl show-user "$USER" -p Linger`
+  should print `Linger=yes`.
+- Confirm the service ran: `journalctl --user -u razer-keyboard-rgb-restore.service`.
+- The headless restorer waits up to 30 seconds for the keyboard to appear; if
+  the device enumerates later, run `systemctl --user restart
+  razer-keyboard-rgb-restore.service`.
+- Re-run `./install.sh` to refresh the unit after moving the extension source
+  directory, since the unit embeds the absolute path to `scripts/restore-boot.js`.
+
 ## File overview
 
 - `extension.js` — GNOME Shell runtime, menu, overlay, and restore behavior
-- `lib/` — backend state, color math, keyboard layout, and preset helpers
+- `lib/` — backend state, color math, keyboard layout, lighting restore, and preset helpers
+- `scripts/restore-boot.js` — headless GJS applier used by the boot-time service
 - `ui/` — reusable GNOME Shell UI helpers for chips and monitor placement
 - `shared.js` — `OpenRazer` discovery and lighting helpers
 - `package.json` — local Node-based test entry points
-- `install.sh` — local install, migration, and schema compilation flow
+- `install.sh` — local install, migration, schema compilation, and boot-time restore setup
 - `schemas/org.gnome.shell.extensions.razer-keyboard-rgb-control.gschema.xml` — GSettings schema for saved lighting state and custom layouts
 - `tests/live-driver.js` — GJS live-state helper for direct verification
 - `tests/live.integration.test.js` — real-device keyboard checks

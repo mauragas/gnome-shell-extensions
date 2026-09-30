@@ -8,6 +8,8 @@ UUID="razer-keyboard-rgb-control"
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEST_DIR="$HOME/.local/share/gnome-shell/extensions/$UUID"
 BACKUP_ROOT="$HOME/.local/share/gnome-shell/extension-backups/$UUID"
+SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
+RESTORE_UNIT_NAME="razer-keyboard-rgb-restore.service"
 
 find_extension_dirs_by_prefix() {
     local prefix="$1"
@@ -68,6 +70,68 @@ queue_extension_enable_on_next_login() {
     gsettings set org.gnome.shell enabled-extensions "$updated"
 }
 
+install_boot_restore_service() {
+    local gjs_bin
+    gjs_bin="$(command -v gjs 2>/dev/null || true)"
+    if [[ -z "$gjs_bin" ]]; then
+        echo "Warning: gjs is not installed; skipping boot-time lighting restore setup."
+        return 0
+    fi
+
+    if ! command -v systemctl >/dev/null 2>&1; then
+        echo "Warning: systemctl is not available; skipping boot-time lighting restore setup."
+        return 0
+    fi
+
+    local restore_script="$SRC_DIR/scripts/restore-boot.js"
+    if [[ ! -f "$restore_script" ]]; then
+        echo "Warning: $restore_script is missing; skipping boot-time lighting restore setup."
+        return 0
+    fi
+
+    local unit_path="$SYSTEMD_USER_DIR/$RESTORE_UNIT_NAME"
+    mkdir -p "$SYSTEMD_USER_DIR"
+
+    cat > "$unit_path" <<EOF
+[Unit]
+Description=Restore Razer keyboard RGB lighting from the saved preset
+After=openrazer-daemon.service
+Wants=openrazer-daemon.service
+
+[Service]
+Type=oneshot
+ExecStart=$gjs_bin -m "$restore_script"
+RemainAfterExit=yes
+
+[Install]
+WantedBy=default.target
+EOF
+
+    echo "Installed boot-time lighting restore unit: $unit_path"
+
+    # Enable user lingering so the user session (and openrazer-daemon) starts at
+    # boot. That lets the restore unit run before the user logs in graphically.
+    if command -v loginctl >/dev/null 2>&1; then
+        if loginctl show-user "$USER" -p Linger 2>/dev/null | grep -q '^Linger=yes$'; then
+            echo "User lingering is already enabled for $USER."
+        elif loginctl enable-linger "$USER" >/dev/null 2>&1; then
+            echo "Enabled user lingering for $USER (session starts at boot)."
+        else
+            echo "Warning: could not enable user lingering automatically."
+            echo "         Run:  sudo loginctl enable-linger $USER"
+        fi
+    fi
+
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+    if systemctl --user enable "$RESTORE_UNIT_NAME" >/dev/null 2>&1; then
+        echo "Enabled $RESTORE_UNIT_NAME (restores lighting at boot and next session start)."
+    else
+        echo "Warning: could not enable $RESTORE_UNIT_NAME in the current session."
+        echo "         After logging into a GNOME session, run:"
+        echo "           systemctl --user enable $RESTORE_UNIT_NAME"
+    fi
+}
+
 mkdir -p "$(dirname "$DEST_DIR")"
 mkdir -p "$BACKUP_ROOT"
 
@@ -114,6 +178,8 @@ if [[ -d "$SRC_DIR/schemas" ]]; then
     echo "Schemas compiled."
 fi
 
+install_boot_restore_service
+
 LIVE_ENABLE_SUCCEEDED=false
 
 if command -v gnome-extensions >/dev/null 2>&1; then
@@ -158,6 +224,11 @@ echo "Restart GNOME Shell to load the extension:"
 echo "  Wayland : log out and log back in, or test in a nested session:"
 echo "           dbus-run-session -- gnome-shell --nested --wayland"
 echo "  X11    : Alt+F2 → r → Enter"
+echo ""
+echo "Boot-time lighting restore (before login):"
+echo "  Service : $RESTORE_UNIT_NAME"
+echo "  Logs    : journalctl --user -u $RESTORE_UNIT_NAME"
+echo "  Apply   : systemctl --user start $RESTORE_UNIT_NAME  (apply the saved preset now)"
 echo ""
 echo "If the extension is still disabled, enable it manually:"
 echo "  gnome-extensions enable $UUID"

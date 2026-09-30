@@ -17,23 +17,12 @@ import {
     loadSelectionState,
     setBrightness,
 } from '../shared.js';
-import {buildProgrammerModeMatrix} from '../lib/matrix-layout.js';
-import {PROGRAMMER_MODE_PRESETS} from '../lib/presets.js';
+import {
+    resolveModeLayoutFrame,
+    resolveSelectionColor,
+} from '../lib/lighting-restore.js';
 
 const SCHEMA_ID = 'org.gnome.shell.extensions.razer-keyboard-rgb-control';
-const KEYBOARD_DEFAULT_COLOR_ID = 'green';
-const COLOR_PRESETS = new Map([
-    ['red', {red: 255, green: 0, blue: 0}],
-    ['orange', {red: 255, green: 128, blue: 0}],
-    ['yellow', {red: 255, green: 214, blue: 10}],
-    ['green', {red: 0, green: 255, blue: 0}],
-    ['cyan', {red: 0, green: 224, blue: 255}],
-    ['blue', {red: 0, green: 102, blue: 255}],
-    ['purple', {red: 124, green: 92, blue: 255}],
-    ['pink', {red: 255, green: 96, blue: 188}],
-    ['white', {red: 255, green: 255, blue: 255}],
-    ['slate', {red: 148, green: 163, blue: 184}],
-]);
 const KEYBOARD_EFFECT_SUPPORT = {
     spectrum: {
         isSupported: capabilities => Boolean(capabilities?.spectrum),
@@ -222,69 +211,6 @@ function loadPersistedStateSnapshot() {
     };
 }
 
-function clampUnit(value) {
-    const numeric = Number(value);
-    if (Number.isNaN(numeric))
-        return 0;
-
-    return Math.max(0, Math.min(1, numeric));
-}
-
-function hsvToRgb(hue, saturation = 1, value = 1) {
-    const normalizedHue = clampUnit(hue);
-    const chroma = value * saturation;
-    const scaledHue = normalizedHue * 6;
-    const x = chroma * (1 - Math.abs((scaledHue % 2) - 1));
-
-    let red = 0;
-    let green = 0;
-    let blue = 0;
-
-    if (scaledHue < 1) {
-        red = chroma;
-        green = x;
-    } else if (scaledHue < 2) {
-        red = x;
-        green = chroma;
-    } else if (scaledHue < 3) {
-        green = chroma;
-        blue = x;
-    } else if (scaledHue < 4) {
-        green = x;
-        blue = chroma;
-    } else if (scaledHue < 5) {
-        red = x;
-        blue = chroma;
-    } else {
-        red = chroma;
-        blue = x;
-    }
-
-    const match = value - chroma;
-    return {
-        red: Math.round((red + match) * 255),
-        green: Math.round((green + match) * 255),
-        blue: Math.round((blue + match) * 255),
-    };
-}
-
-function getColorPreset(colorId, customHue, fallbackId) {
-    if (colorId === 'custom')
-        return hsvToRgb(customHue ?? 0);
-
-    return COLOR_PRESETS.get(colorId)
-        ?? COLOR_PRESETS.get(fallbackId)
-        ?? COLOR_PRESETS.get(KEYBOARD_DEFAULT_COLOR_ID);
-}
-
-function getKeyboardColorPreset(selectionState) {
-    return getColorPreset(
-        selectionState?.selectedColorId,
-        selectionState?.customHue,
-        KEYBOARD_DEFAULT_COLOR_ID
-    );
-}
-
 function buildSupportResult(supported, reason) {
     return {
         ok: Boolean(supported),
@@ -300,20 +226,8 @@ function getEffectSupportResult(effectId, capabilities, supportMap) {
     );
 }
 
-function getModeLayoutFrame(modeId, customModeLayouts, matrixDimensions = [6, 18]) {
-    const storedLayout = customModeLayouts?.[modeId];
-    if (storedLayout?.frame)
-        return storedLayout.frame;
-
-    const modePreset = PROGRAMMER_MODE_PRESETS.find(preset => preset.id === modeId);
-    if (!modePreset)
-        return null;
-
-    return buildProgrammerModeMatrix(modePreset, matrixDimensions);
-}
-
 function getKeyboardModeRestoreSupport(modeId, customModeLayouts, matrixDimensions) {
-    const modeLayoutFrame = getModeLayoutFrame(modeId, customModeLayouts, matrixDimensions);
+    const modeLayoutFrame = resolveModeLayoutFrame(modeId, customModeLayouts, matrixDimensions);
     if (modeLayoutFrame)
         return {ok: true, reason: null};
 
@@ -358,7 +272,7 @@ async function applyKeyboardLightingFromSelection(device, selectionState, custom
         return;
 
     if (selectionState.selectedModeId) {
-        const modeLayoutFrame = getModeLayoutFrame(
+        const modeLayoutFrame = resolveModeLayoutFrame(
             selectionState.selectedModeId,
             customModeLayouts,
             device.matrixDimensions
@@ -373,7 +287,7 @@ async function applyKeyboardLightingFromSelection(device, selectionState, custom
         return;
     }
 
-    const color = getKeyboardColorPreset(selectionState);
+    const color = resolveSelectionColor(selectionState);
     switch (selectionState.selectedEffectId) {
     case 'spectrum':
         await applySpectrum(device);

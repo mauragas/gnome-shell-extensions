@@ -34,6 +34,11 @@ import {
 
 import {didKeyboardBecomeAvailable} from './lib/backend-state.js';
 import {
+    getBrightnessPercent,
+    resolveModeLayoutFrame,
+    resolveSelectionColor,
+} from './lib/lighting-restore.js';
+import {
     buildCustomColorPreset,
     buildKeyboardEditorKeyStyle,
     clampUnit,
@@ -54,9 +59,7 @@ import {
     readKeyColorFromLayout,
 } from './lib/matrix-layout.js';
 import {
-    COLOR_PRESET_MAP,
     CUSTOM_MODE_LAYOUT_VERSION,
-    DEFAULT_CUSTOM_HUE,
     PRIMARY_COLOR_ROWS,
     PROGRAMMER_MODE_PRESETS,
 } from './lib/presets.js';
@@ -370,12 +373,6 @@ function getBrightnessPresetId(brightness) {
     }
 
     return closestPreset.id;
-}
-
-function getBrightnessPresetById(presetId) {
-    return BRIGHTNESS_PRESETS.find(preset => preset.id === presetId)
-    ?? BRIGHTNESS_PRESETS.find(preset => preset.id === 'brightness-100')
-        ?? null;
 }
 
 function cloneSelectionState(selectionState) {
@@ -727,12 +724,7 @@ export default class RazerRgbControlPad extends Extension {
     }
 
     _getColorPresetForSelectionState(selectionState = this._selectionState) {
-        if (selectionState?.selectedColorId === 'custom')
-            return buildCustomColorPreset(selectionState.customHue);
-
-        return COLOR_PRESET_MAP.get(selectionState?.selectedColorId)
-            ?? COLOR_PRESET_MAP.get('green')
-            ?? buildCustomColorPreset(DEFAULT_CUSTOM_HUE);
+        return resolveSelectionColor(selectionState);
     }
 
     _updateSelectionState(patch, {syncStartupRestore = true} = {}) {
@@ -1023,13 +1015,17 @@ export default class RazerRgbControlPad extends Extension {
         if (!keyboard)
             return;
 
-        const modePreset = this._getModePresetById(selectionState?.selectedModeId);
-        if (modePreset) {
-            const matrixDimensions = keyboard.matrixDimensions ?? this._getMatrixDimensions();
-            const modeLayout = this._getModeLayout(modePreset.id, matrixDimensions);
-            await applyCustomMatrix(keyboard, modeLayout.frame);
+        const matrixDimensions = keyboard.matrixDimensions ?? this._getMatrixDimensions();
+        const modeFrame = resolveModeLayoutFrame(
+            selectionState?.selectedModeId,
+            this._customModeLayouts,
+            matrixDimensions
+        );
+
+        if (modeFrame) {
+            await applyCustomMatrix(keyboard, modeFrame);
         } else {
-            const colorPreset = this._getColorPresetForSelectionState(selectionState);
+            const colorPreset = resolveSelectionColor(selectionState);
             switch (selectionState?.selectedEffectId) {
             case 'spectrum':
                 await applySpectrum(keyboard);
@@ -1062,9 +1058,9 @@ export default class RazerRgbControlPad extends Extension {
             }
         }
 
-        const brightnessPreset = getBrightnessPresetById(selectionState?.selectedBrightnessId);
-        if (brightnessPreset)
-            await brightnessPreset.run(keyboard);
+        const brightnessPercent = getBrightnessPercent(selectionState);
+        if (brightnessPercent !== null)
+            await setBrightness(keyboard, brightnessPercent);
     }
 
     async _maybeRestoreKeyboardOnStartup() {
