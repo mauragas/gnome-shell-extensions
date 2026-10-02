@@ -27,10 +27,14 @@ import {
     deriveIndicatorState,
     parseSnapshot,
 } from './lib/status-store.js';
+import {buildProfileMenuActions, isProfileSyncing} from './lib/profile-actions.js';
 import {summarizeMode} from './lib/validation.js';
 
 const PANEL_MENU_ALIGNMENT = 0.5;
 const SNAPSHOT_REFRESH_INTERVAL_MS = 30000;
+const HELPER_RECOVERY_REFRESH_DELAY_MS = 1200;
+const ACTION_REFRESH_DELAY_MS = 180;
+const PROFILE_SYNC_ANIMATION_INTERVAL_MS = 180;
 
 function buildHelperStateLabel(snapshot) {
     switch (snapshot.helperState) {
@@ -55,6 +59,11 @@ export default class FolderMirrorExtension extends Extension {
     enable() {
         this._settings = this.getSettings(SETTINGS_SCHEMA_ID);
         this._snapshot = buildSnapshot({helperState: 'starting'});
+        this._helperRecoveryInFlight = false;
+        this._delayedRefreshTimeoutId = 0;
+        this._actionRefreshTimeoutId = 0;
+        this._profileSyncAnimationFrame = 0;
+        this._profileSyncAnimationTimeoutId = 0;
         this._indicator = new PanelMenu.Button(PANEL_MENU_ALIGNMENT, this.metadata.name, false);
         this._icon = new St.Icon({
             icon_name: PANEL_ICON_NAMES.idle,
@@ -66,8 +75,10 @@ export default class FolderMirrorExtension extends Extension {
         this._menuOpenStateChangedId = this._indicator.menu.connect(
             'open-state-changed',
             (_menu, isOpen) => {
-                if (!isOpen)
+                if (!isOpen) {
+                    this._stopProfileSyncAnimation();
                     return;
+                }
 
                 this._refreshSnapshot().catch(error => {
                     console.error(`[FM] menu refresh failed: ${error.message}`);
@@ -122,6 +133,18 @@ export default class FolderMirrorExtension extends Extension {
             this._refreshTimeoutId = 0;
         }
 
+        if (this._actionRefreshTimeoutId) {
+            GLib.source_remove(this._actionRefreshTimeoutId);
+            this._actionRefreshTimeoutId = 0;
+        }
+
+        if (this._delayedRefreshTimeoutId) {
+            GLib.source_remove(this._delayedRefreshTimeoutId);
+            this._delayedRefreshTimeoutId = 0;
+        }
+
+        this._stopProfileSyncAnimation();
+
         if (this._snapshotSignalId) {
             Gio.DBus.session.signal_unsubscribe(this._snapshotSignalId);
             this._snapshotSignalId = 0;
@@ -141,6 +164,7 @@ export default class FolderMirrorExtension extends Extension {
         this._indicator = null;
         this._icon = null;
         this._settings = null;
+        this._helperRecoveryInFlight = false;
     }
 
     _syncIndicatorVisibility() {
@@ -163,6 +187,102 @@ export default class FolderMirrorExtension extends Extension {
         this._snapshot = await getHelperSnapshot();
         this._updateIndicator();
         this._rebuildMenu();
+
+        if (this._snapshot.helperState === 'running' || this._snapshot.helperState === 'starting') {
+            this._helperRecoveryInFlight = false;
+            return;
+        }
+
+        if (!this._settings?.get_boolean('auto-start-helper') || this._helperRecoveryInFlight)
+            return;
+
+        this._helperRecoveryInFlight = true;
+        restartHelperService()
+            .then(() => {
+                this._scheduleDelayedSnapshotRefresh();
+            })
+            .catch(error => {
+                this._helperRecoveryInFlight = false;
+                console.error(`[FM] helper auto-recovery failed: ${error.message}`);
+            });
+    }
+
+    _scheduleDelayedSnapshotRefresh(delayMs = HELPER_RECOVERY_REFRESH_DELAY_MS) {
+        if (this._delayedRefreshTimeoutId) {
+            GLib.source_remove(this._delayedRefreshTimeoutId);
+            this._delayedRefreshTimeoutId = 0;
+        }
+
+        this._delayedRefreshTimeoutId = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT,
+            delayMs,
+            () => {
+                this._delayedRefreshTimeoutId = 0;
+                this._refreshSnapshot().catch(error => {
+                    this._helperRecoveryInFlight = false;
+                    console.error(`[FM] delayed helper refresh failed: ${error.message}`);
+                });
+                return GLib.SOURCE_REMOVE;
+            }
+        );
+    }
+
+    _scheduleActionSnapshotRefresh(delayMs = ACTION_REFRESH_DELAY_MS) {
+        if (this._actionRefreshTimeoutId) {
+            GLib.source_remove(this._actionRefreshTimeoutId);
+            this._actionRefreshTimeoutId = 0;
+        }
+
+        this._actionRefreshTimeoutId = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT,
+            delayMs,
+            () => {
+                this._actionRefreshTimeoutId = 0;
+                this._refreshSnapshot().catch(error => {
+                    console.error(`[FM] action refresh failed: ${error.message}`);
+                });
+                return GLib.SOURCE_REMOVE;
+            }
+        );
+    }
+
+    _hasSyncingProfiles() {
+        return this._snapshot.profiles.some(profile => isProfileSyncing(profile));
+    }
+
+    _syncProfileSyncAnimationState() {
+        const shouldAnimate = Boolean(this._indicator?.menu?.isOpen) && this._hasSyncingProfiles();
+        if (!shouldAnimate) {
+            this._stopProfileSyncAnimation();
+            return;
+        }
+
+        if (this._profileSyncAnimationTimeoutId)
+            return;
+
+        this._profileSyncAnimationTimeoutId = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT,
+            PROFILE_SYNC_ANIMATION_INTERVAL_MS,
+            () => {
+                if (!this._indicator?.menu?.isOpen || !this._hasSyncingProfiles()) {
+                    this._stopProfileSyncAnimation();
+                    return GLib.SOURCE_REMOVE;
+                }
+
+                this._profileSyncAnimationFrame = (this._profileSyncAnimationFrame + 1) % 4;
+                this._rebuildMenu();
+                return GLib.SOURCE_CONTINUE;
+            }
+        );
+    }
+
+    _stopProfileSyncAnimation() {
+        if (this._profileSyncAnimationTimeoutId) {
+            GLib.source_remove(this._profileSyncAnimationTimeoutId);
+            this._profileSyncAnimationTimeoutId = 0;
+        }
+
+        this._profileSyncAnimationFrame = 0;
     }
 
     _updateIndicator() {
@@ -189,11 +309,14 @@ export default class FolderMirrorExtension extends Extension {
             const emptyItem = new PopupMenu.PopupMenuItem('No profiles configured yet.', {reactive: false});
             emptyItem.setSensitive(false);
             menu.addMenuItem(emptyItem);
+            this._syncProfileSyncAnimationState();
             return;
         }
 
         for (const profile of this._snapshot.profiles)
             menu.addMenuItem(this._createProfileItem(profile));
+
+        this._syncProfileSyncAnimationState();
     }
 
     _createGlobalActionsItem() {
@@ -324,9 +447,7 @@ export default class FolderMirrorExtension extends Extension {
                             ? 'Requested helper service restart.'
                             : 'Requested helper restart.'
                     );
-                    this._refreshSnapshot().catch(error => {
-                        console.error(`[FM] helper refresh after restart failed: ${error.message}`);
-                    });
+                    this._scheduleDelayedSnapshotRefresh();
                 },
                 {
                     warning: this._snapshot.helperState !== 'running',
@@ -359,14 +480,16 @@ export default class FolderMirrorExtension extends Extension {
             styleClass = 'fm-action-button',
             expand = false,
             centerContent = false,
+            enabled = true,
         } = normalizedOptions;
         const button = new St.Button({
             style_class: styleClass,
-            can_focus: true,
-            reactive: true,
-            track_hover: true,
+            can_focus: enabled,
+            reactive: enabled,
+            track_hover: enabled,
             x_expand: expand,
         });
+        button.opacity = enabled ? 255 : 150;
         const content = new St.BoxLayout({
             style_class: 'fm-action-content',
             x_expand: !centerContent,
@@ -389,11 +512,13 @@ export default class FolderMirrorExtension extends Extension {
             y_align: Clutter.ActorAlign.CENTER,
         }));
         button.set_child(content);
-        button.connect('clicked', () => {
-            Promise.resolve(action()).catch(error => {
-                this._notify(error.message, true);
+        if (enabled) {
+            button.connect('clicked', () => {
+                Promise.resolve(action()).catch(error => {
+                    this._notify(error.message, true);
+                });
             });
-        });
+        }
         return button;
     }
 
@@ -476,6 +601,24 @@ export default class FolderMirrorExtension extends Extension {
         return button;
     }
 
+    _createProfileMethodButton(profile, actionDefinition) {
+        return this._createActionButton(
+            actionDefinition.iconName,
+            actionDefinition.label,
+            async () => {
+                await invokeHelperVoidMethod(
+                    actionDefinition.methodName,
+                    new GLib.Variant('(s)', [profile.id])
+                );
+                this._scheduleActionSnapshotRefresh();
+                this._notify(actionDefinition.notification);
+            },
+            {
+                enabled: actionDefinition.enabled !== false,
+            }
+        );
+    }
+
     _createProfileItem(profile) {
         const item = new PopupMenu.PopupBaseMenuItem({
             reactive: false,
@@ -524,34 +667,11 @@ export default class FolderMirrorExtension extends Extension {
         });
         row.add_child(actions);
 
-        actions.add_child(this._createActionButton(
-            'media-playback-start-symbolic',
-            'Run now',
-            async () => {
-                await invokeHelperVoidMethod('RunProfile', new GLib.Variant('(s)', [profile.id]));
-                this._notify(`Triggered ${profile.name}.`);
-            }
-        ));
-
-        if (profile.status === 'paused') {
-            actions.add_child(this._createActionButton(
-                'media-playback-start-symbolic',
-                'Resume',
-                async () => {
-                    await invokeHelperVoidMethod('ResumeProfile', new GLib.Variant('(s)', [profile.id]));
-                    this._notify(`Resumed ${profile.name}.`);
-                }
-            ));
-        } else {
-            actions.add_child(this._createActionButton(
-                'media-playback-pause-symbolic',
-                'Pause',
-                async () => {
-                    await invokeHelperVoidMethod('PauseProfile', new GLib.Variant('(s)', [profile.id]));
-                    this._notify(`Paused ${profile.name}.`);
-                }
-            ));
-        }
+        const {syncAction, controlAction} = buildProfileMenuActions(profile, {
+            syncAnimationFrame: this._profileSyncAnimationFrame,
+        });
+        actions.add_child(this._createProfileMethodButton(profile, syncAction));
+        actions.add_child(this._createProfileMethodButton(profile, controlAction));
 
         if (profile.sourcePath)
             actions.add_child(this._createPathButton('Src', profile.sourcePath));

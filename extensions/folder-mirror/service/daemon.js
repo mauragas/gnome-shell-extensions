@@ -28,6 +28,7 @@ import {
     buildSnapshot,
     serializeSnapshot,
 } from '../lib/status-store.js';
+import {unpackDbusParameters} from '../lib/dbus-parameters.js';
 import {
     findProfileById,
     normalizeProfiles,
@@ -318,6 +319,40 @@ class FolderMirrorDaemon {
         return this._runtimeProfiles.get(profileId) ?? null;
     }
 
+    _getProfileOrThrow(profileId, profiles = this._profiles) {
+        const profile = findProfileById(profiles, profileId);
+        if (!profile)
+            throw new Error(`Unknown profile id: ${profileId}`);
+
+        return profile;
+    }
+
+    _assertProfileCanStartRun(profileId) {
+        const profile = this._getProfileOrThrow(profileId);
+        if (this._activeRuns.has(profileId)) {
+            throw new Error(`A sync is already in progress for ${profile.name}.`);
+        }
+
+        return profile;
+    }
+
+    _returnVoidInvocation(invocation) {
+        invocation.return_value(new GLib.Variant('()', []));
+    }
+
+    _recordDetachedActionFailure(error, context) {
+        if (error?._folderMirrorLogged)
+            return;
+
+        const message = error?.message ?? String(error);
+        const composedMessage = context
+            ? `${context}: ${message}`
+            : message;
+        this._rememberError(composedMessage);
+        this._log('error', composedMessage);
+        this._publishSnapshot();
+    }
+
     _scheduleStartupProfiles() {
         if (!this._config.autoStartHelper)
             return;
@@ -403,20 +438,25 @@ class FolderMirrorDaemon {
         const implementation = {
             GetSnapshot: () => this._snapshotJson,
             RunProfileAsync: (parameters, invocation) => {
-                const [profileId] = parameters.deepUnpack();
-                this._invokeProfileRun(profileId, {
-                    dryRun: false,
-                    trigger: 'manual',
-                })
-                    .then(() => {
-                        invocation.return_value(new GLib.Variant('()', []));
-                    })
-                    .catch(error => {
-                        invocation.return_dbus_error(DBUS_ERROR_NAME, error.message);
+                try {
+                    const [profileId] = unpackDbusParameters(parameters);
+                    const profile = this._assertProfileCanStartRun(profileId);
+                    this._returnVoidInvocation(invocation);
+                    this._invokeProfileRun(profileId, {
+                        dryRun: false,
+                        trigger: 'manual',
+                    }).catch(error => {
+                        this._recordDetachedActionFailure(
+                            error,
+                            `Manual sync failed for ${profile.name}`
+                        );
                     });
+                } catch (error) {
+                    invocation.return_dbus_error(DBUS_ERROR_NAME, error.message);
+                }
             },
             RunProfileDryRunAsync: (parameters, invocation) => {
-                const [profileId] = parameters.deepUnpack();
+                const [profileId] = unpackDbusParameters(parameters);
                 this._invokeProfileRun(profileId, {
                     dryRun: true,
                     trigger: 'manual-dry-run',
@@ -431,34 +471,48 @@ class FolderMirrorDaemon {
                     });
             },
             PauseProfileAsync: (parameters, invocation) => {
-                const [profileId] = parameters.deepUnpack();
-                this._setProfilePausedState(profileId, true)
-                    .then(() => invocation.return_value(new GLib.Variant('()', [])))
-                    .catch(error => invocation.return_dbus_error(DBUS_ERROR_NAME, error.message));
+                try {
+                    const [profileId] = unpackDbusParameters(parameters);
+                    this._setProfilePausedState(profileId, true);
+                    this._returnVoidInvocation(invocation);
+                } catch (error) {
+                    invocation.return_dbus_error(DBUS_ERROR_NAME, error.message);
+                }
             },
             ResumeProfileAsync: (parameters, invocation) => {
-                const [profileId] = parameters.deepUnpack();
-                this._setProfilePausedState(profileId, false)
-                    .then(() => invocation.return_value(new GLib.Variant('()', [])))
-                    .catch(error => invocation.return_dbus_error(DBUS_ERROR_NAME, error.message));
+                try {
+                    const [profileId] = unpackDbusParameters(parameters);
+                    this._setProfilePausedState(profileId, false);
+                    this._returnVoidInvocation(invocation);
+                } catch (error) {
+                    invocation.return_dbus_error(DBUS_ERROR_NAME, error.message);
+                }
             },
             RunAllAsync: (_parameters, invocation) => {
+                this._returnVoidInvocation(invocation);
                 this._runAllProfiles({dryRun: false})
-                    .then(() => invocation.return_value(new GLib.Variant('()', [])))
-                    .catch(error => invocation.return_dbus_error(DBUS_ERROR_NAME, error.message));
+                    .catch(error => {
+                        this._recordDetachedActionFailure(error, 'Run-all sync failed');
+                    });
             },
             PauseAllAsync: (_parameters, invocation) => {
-                this._setAllProfilesPausedState(true)
-                    .then(() => invocation.return_value(new GLib.Variant('()', [])))
-                    .catch(error => invocation.return_dbus_error(DBUS_ERROR_NAME, error.message));
+                try {
+                    this._setAllProfilesPausedState(true);
+                    this._returnVoidInvocation(invocation);
+                } catch (error) {
+                    invocation.return_dbus_error(DBUS_ERROR_NAME, error.message);
+                }
             },
             ResumeAllAsync: (_parameters, invocation) => {
-                this._setAllProfilesPausedState(false)
-                    .then(() => invocation.return_value(new GLib.Variant('()', [])))
-                    .catch(error => invocation.return_dbus_error(DBUS_ERROR_NAME, error.message));
+                try {
+                    this._setAllProfilesPausedState(false);
+                    this._returnVoidInvocation(invocation);
+                } catch (error) {
+                    invocation.return_dbus_error(DBUS_ERROR_NAME, error.message);
+                }
             },
             RestartHelperAsync: (_parameters, invocation) => {
-                invocation.return_value(new GLib.Variant('()', []));
+                this._returnVoidInvocation(invocation);
                 GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
                     this._log('warn', 'Restart requested over D-Bus.');
                     this.stop(75);
@@ -497,7 +551,7 @@ class FolderMirrorDaemon {
             throw new Error(failures.join('\n'));
     }
 
-    async _setAllProfilesPausedState(paused) {
+    _setAllProfilesPausedState(paused) {
         const nextProfiles = normalizeProfiles(loadProfiles(this._settings).map(profile => ({
             ...profile,
             paused: profile.enabled ? paused : profile.paused,
@@ -507,11 +561,9 @@ class FolderMirrorDaemon {
         this._publishSnapshot();
     }
 
-    async _setProfilePausedState(profileId, paused) {
+    _setProfilePausedState(profileId, paused) {
         const currentProfiles = loadProfiles(this._settings);
-        const targetProfile = findProfileById(currentProfiles, profileId);
-        if (!targetProfile)
-            throw new Error(`Unknown profile id: ${profileId}`);
+        this._getProfileOrThrow(profileId, currentProfiles);
 
         const nextProfiles = normalizeProfiles(currentProfiles.map(profile =>
             profile.id === profileId
@@ -736,13 +788,7 @@ class FolderMirrorDaemon {
     }
 
     async _invokeProfileRun(profileId, {dryRun = false, trigger = 'manual'} = {}) {
-        const profile = findProfileById(this._profiles, profileId);
-        if (!profile)
-            throw new Error(`Unknown profile id: ${profileId}`);
-
-        if (this._activeRuns.has(profileId)) {
-            throw new Error(`A sync is already in progress for ${profile.name}.`);
-        }
+        const profile = this._assertProfileCanStartRun(profileId);
 
         const runtimeEntry = this._getProfileRuntimeEntry(profileId);
         this._activeRuns.add(profileId);
