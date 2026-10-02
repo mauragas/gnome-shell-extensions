@@ -102,17 +102,20 @@ generate_service_unit() {
     cat > "$SERVICE_UNIT_PATH" <<EOF
 [Unit]
 Description=Folder Mirror GNOME Shell background helper
-After=default.target
+After=default.target graphical-session.target
+PartOf=graphical-session.target
 
 [Service]
 Type=simple
 WorkingDirectory=$SRC_DIR
 ExecStart=$gjs_bin -m "$SRC_DIR/service/daemon.js"
-Restart=on-failure
+SuccessExitStatus=75
+Restart=always
 RestartSec=3
 
 [Install]
 WantedBy=default.target
+WantedBy=graphical-session.target
 EOF
 
     echo "Installed helper unit: $SERVICE_UNIT_PATH"

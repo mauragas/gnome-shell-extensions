@@ -20,6 +20,7 @@ import {
     loadHelperConfigFromSettings,
     loadProfiles,
     openPath,
+    restartHelperService,
     saveGlobalExcludes,
     saveProfiles,
 } from './shared.js';
@@ -767,15 +768,8 @@ export default class FolderMirrorPreferences extends ExtensionPreferences {
     async _restartHelper() {
         try {
             await invokeHelperVoidMethod('RestartHelper');
-        } catch (error) {
-            const process = Gio.Subprocess.new(
-                ['systemctl', '--user', 'restart', SYSTEMD_UNIT_NAME],
-                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
-            );
-            const [ok, stdout, stderr] = await process.communicate_utf8_async(null, null);
-            if (!ok || !process.get_successful()) {
-                throw new Error((stderr || stdout || error.message).trim());
-            }
+        } catch (_error) {
+            await restartHelperService();
         }
 
         await this._refreshDiagnostics();

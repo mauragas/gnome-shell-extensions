@@ -18,6 +18,7 @@ import {
 } from './lib/validation.js';
 
 Gio._promisify(Gio.DBusConnection.prototype, 'call', 'call_finish');
+Gio._promisify(Gio.Subprocess.prototype, 'communicate_utf8_async', 'communicate_utf8_finish');
 
 export const SETTINGS_SCHEMA_ID = 'org.gnome.shell.extensions.folder-mirror';
 export const EXTENSION_TITLE = 'Folder Mirror';
@@ -299,6 +300,36 @@ export async function invokeHelperStringMethod(methodName, parameters = null, ti
         timeoutMs
     );
     return result.get_child_value(0).get_string()[0];
+}
+
+export async function runUserSystemctl(systemctlArgs) {
+    const systemctlPath = GLib.find_program_in_path('systemctl') ?? '/usr/bin/systemctl';
+    if (!GLib.file_test(systemctlPath, GLib.FileTest.EXISTS))
+        throw new Error('systemctl is not available on this machine.');
+
+    const process = Gio.Subprocess.new(
+        [systemctlPath, '--user', ...systemctlArgs],
+        Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
+    );
+    const [, stdout, stderr] = await process.communicate_utf8_async(null, null);
+    const exitCode = process.get_if_exited()
+        ? process.get_exit_status()
+        : -1;
+
+    if (exitCode !== 0) {
+        throw new Error(
+            (stderr || stdout || `systemctl --user ${systemctlArgs.join(' ')} failed`).trim()
+        );
+    }
+
+    return {
+        stdout: stdout ?? '',
+        stderr: stderr ?? '',
+    };
+}
+
+export async function restartHelperService() {
+    return runUserSystemctl(['restart', SYSTEMD_UNIT_NAME]);
 }
 
 export function createStoppedSnapshot(reason = null) {

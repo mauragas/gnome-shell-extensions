@@ -20,6 +20,7 @@ import {
     getLogDir,
     invokeHelperVoidMethod,
     openPath,
+    restartHelperService,
 } from './shared.js';
 import {
     buildSnapshot,
@@ -240,6 +241,10 @@ export default class FolderMirrorExtension extends Extension {
             ? `${errorCount} need attention`
             : 'No errors';
         const helperSubtitle = buildHelperStateLabel(this._snapshot);
+        const helperRunning = this._snapshot.helperState === 'running' || this._snapshot.helperState === 'starting';
+        const helperActionLabel = helperRunning
+            ? 'Restart'
+            : 'Start helper';
 
         const actions = [
             this._createGlobalActionButton(
@@ -300,11 +305,28 @@ export default class FolderMirrorExtension extends Extension {
             ),
             this._createGlobalActionButton(
                 'view-refresh-symbolic',
-                'Restart',
+                helperActionLabel,
                 helperSubtitle,
                 async () => {
-                    await invokeHelperVoidMethod('RestartHelper');
-                    this._notify('Requested helper restart.');
+                    let usedSystemctlFallback = false;
+                    try {
+                        if (helperRunning)
+                            await invokeHelperVoidMethod('RestartHelper');
+                        else
+                            throw new Error('Helper is not currently advertising its D-Bus name.');
+                    } catch {
+                        await restartHelperService();
+                        usedSystemctlFallback = true;
+                    }
+
+                    this._notify(
+                        usedSystemctlFallback
+                            ? 'Requested helper service restart.'
+                            : 'Requested helper restart.'
+                    );
+                    this._refreshSnapshot().catch(error => {
+                        console.error(`[FM] helper refresh after restart failed: ${error.message}`);
+                    });
                 },
                 {
                     warning: this._snapshot.helperState !== 'running',
