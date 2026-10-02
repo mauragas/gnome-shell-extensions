@@ -23,7 +23,6 @@ import {
 } from './shared.js';
 import {
     buildSnapshot,
-    buildSnapshotSummary,
     deriveIndicatorState,
     parseSnapshot,
 } from './lib/status-store.js';
@@ -180,8 +179,6 @@ export default class FolderMirrorExtension extends Extension {
         const menu = this._indicator.menu;
         menu.removeAll();
 
-        menu.addMenuItem(this._createHeaderItem());
-        menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         menu.addMenuItem(this._createGlobalActionsItem());
 
         if (this._snapshot.profiles.length > 0)
@@ -196,53 +193,6 @@ export default class FolderMirrorExtension extends Extension {
 
         for (const profile of this._snapshot.profiles)
             menu.addMenuItem(this._createProfileItem(profile));
-    }
-
-    _createHeaderItem() {
-        const item = new PopupMenu.PopupBaseMenuItem({
-            reactive: false,
-            can_focus: false,
-        });
-
-        const box = new St.BoxLayout({
-            vertical: true,
-            x_expand: true,
-            x_align: Clutter.ActorAlign.CENTER,
-            style_class: 'fm-summary-box',
-        });
-        item.add_child(box);
-
-        box.add_child(new St.Label({
-            text: EXTENSION_TITLE,
-            style_class: 'fm-summary-title',
-            x_expand: true,
-            x_align: Clutter.ActorAlign.CENTER,
-        }));
-
-        box.add_child(new St.Label({
-            text: buildHelperStateLabel(this._snapshot),
-            style_class: 'fm-summary-subtitle',
-            x_expand: true,
-            x_align: Clutter.ActorAlign.CENTER,
-        }));
-
-        box.add_child(new St.Label({
-            text: buildSnapshotSummary(this._snapshot),
-            style_class: 'fm-summary-note',
-            x_expand: true,
-            x_align: Clutter.ActorAlign.CENTER,
-        }));
-
-        if (this._snapshot.recentErrors[0]) {
-            box.add_child(new St.Label({
-                text: this._snapshot.recentErrors[0],
-                style_class: 'fm-summary-note fm-status-error',
-                x_expand: true,
-                x_align: Clutter.ActorAlign.CENTER,
-            }));
-        }
-
-        return item;
     }
 
     _createGlobalActionsItem() {
@@ -265,81 +215,99 @@ export default class FolderMirrorExtension extends Extension {
         });
         item.add_child(container);
 
+        const profileCount = this._snapshot.profiles.length;
+        const pausedCount = this._snapshot.counts.paused;
+        const activeCount = Math.max(0, profileCount - pausedCount);
+        const errorCount = this._snapshot.counts.error;
+        const canControlProfiles = profileCount > 0 && this._snapshot.helperState === 'running';
+        const canResume = canControlProfiles && pausedCount > 0;
+        const canPause = canControlProfiles && activeCount > 0;
+        const runSubtitle = profileCount === 0
+            ? 'No profiles'
+            : `${this._snapshot.counts.healthy} healthy`;
+        const pauseSubtitle = profileCount === 0
+            ? 'No profiles'
+            : pausedCount === profileCount
+                ? 'All paused'
+                : `${activeCount} active`;
+        const resumeSubtitle = pausedCount > 0
+            ? `${pausedCount} paused`
+            : 'None paused';
+        const profilesSubtitle = profileCount === 1
+            ? '1 profile'
+            : `${profileCount} profiles`;
+        const logsSubtitle = errorCount > 0
+            ? `${errorCount} need attention`
+            : 'No errors';
+        const helperSubtitle = buildHelperStateLabel(this._snapshot);
+
         const actions = [
-            this._createActionButton(
+            this._createGlobalActionButton(
                 'media-playback-start-symbolic',
                 'Run all',
+                runSubtitle,
                 async () => {
                     await invokeHelperVoidMethod('RunAll');
                     this._notify('Triggered all enabled mirror profiles.');
                 },
                 {
-                    styleClass: 'fm-global-action-button',
-                    expand: true,
-                    centerContent: true,
+                    enabled: canControlProfiles,
                 }
             ),
-            this._createActionButton(
+            this._createGlobalActionButton(
                 'media-playback-pause-symbolic',
                 'Pause all',
+                pauseSubtitle,
                 async () => {
                     await invokeHelperVoidMethod('PauseAll');
                     this._notify('Paused all enabled mirror profiles.');
                 },
                 {
-                    styleClass: 'fm-global-action-button',
-                    expand: true,
-                    centerContent: true,
+                    enabled: canPause,
                 }
             ),
-            this._createActionButton(
+            this._createGlobalActionButton(
                 'media-playback-start-symbolic',
                 'Resume all',
+                resumeSubtitle,
                 async () => {
                     await invokeHelperVoidMethod('ResumeAll');
                     this._notify('Resumed mirror profiles.');
                 },
                 {
-                    styleClass: 'fm-global-action-button',
-                    expand: true,
-                    centerContent: true,
+                    enabled: canResume,
                 }
             ),
-            this._createActionButton(
+            this._createGlobalActionButton(
                 'emblem-system-symbolic',
                 'Preferences',
+                profilesSubtitle,
                 async () => {
                     this.openPreferences();
                 },
-                {
-                    styleClass: 'fm-global-action-button',
-                    expand: true,
-                    centerContent: true,
-                }
+                {}
             ),
-            this._createActionButton(
+            this._createGlobalActionButton(
                 'text-x-log-symbolic',
                 'Logs',
+                logsSubtitle,
                 async () => {
                     openPath(getLogDir());
                 },
                 {
-                    styleClass: 'fm-global-action-button',
-                    expand: true,
-                    centerContent: true,
+                    warning: errorCount > 0,
                 }
             ),
-            this._createActionButton(
+            this._createGlobalActionButton(
                 'view-refresh-symbolic',
                 'Restart',
+                helperSubtitle,
                 async () => {
                     await invokeHelperVoidMethod('RestartHelper');
                     this._notify('Requested helper restart.');
                 },
                 {
-                    styleClass: 'fm-global-action-button',
-                    expand: true,
-                    centerContent: true,
+                    warning: this._snapshot.helperState !== 'running',
                 }
             ),
         ];
@@ -404,6 +372,64 @@ export default class FolderMirrorExtension extends Extension {
                 this._notify(error.message, true);
             });
         });
+        return button;
+    }
+
+    _createGlobalActionButton(iconName, label, subtitle, action, {
+        enabled = true,
+        warning = false,
+    } = {}) {
+        const button = new St.Button({
+            style_class: warning
+                ? 'fm-global-action-button fm-global-action-button-warning'
+                : 'fm-global-action-button',
+            can_focus: enabled,
+            reactive: enabled,
+            track_hover: enabled,
+            x_expand: true,
+        });
+        button.opacity = enabled ? 255 : 150;
+
+        const content = new St.BoxLayout({
+            vertical: true,
+            x_expand: true,
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.CENTER,
+            style_class: 'fm-global-action-content',
+        });
+
+        const titleRow = new St.BoxLayout({
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.CENTER,
+            style_class: 'fm-global-action-title-row',
+        });
+        titleRow.add_child(new St.Icon({
+            icon_name: iconName,
+            style_class: 'popup-menu-icon',
+        }));
+        titleRow.add_child(new St.Label({
+            text: label,
+            style_class: 'fm-global-action-label',
+            y_align: Clutter.ActorAlign.CENTER,
+        }));
+        content.add_child(titleRow);
+
+        content.add_child(new St.Label({
+            text: subtitle,
+            style_class: 'fm-global-action-subtitle',
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.CENTER,
+        }));
+
+        button.set_child(content);
+        if (enabled) {
+            button.connect('clicked', () => {
+                Promise.resolve(action()).catch(error => {
+                    this._notify(error.message, true);
+                });
+            });
+        }
+
         return button;
     }
 

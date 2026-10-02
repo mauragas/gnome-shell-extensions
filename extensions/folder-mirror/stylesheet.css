@@ -1,24 +1,7 @@
-.fm-summary-box {
-    spacing: 4px;
-    padding: 6px 0;
-}
-
-.fm-summary-title {
-    font-weight: 700;
-    text-align: center;
-}
-
-.fm-summary-subtitle,
-.fm-summary-note,
 .fm-profile-subtitle,
 .fm-profile-path {
     color: rgba(255, 255, 255, 0.72);
     font-size: 12px;
-}
-
-.fm-summary-subtitle,
-.fm-summary-note {
-    text-align: center;
 }
 
 .fm-action-content {
@@ -26,7 +9,15 @@
 }
 
 .fm-global-actions {
-    padding: 0 0 4px;
+    padding: 2px 0 4px;
+}
+
+.fm-global-action-content {
+    spacing: 3px;
+}
+
+.fm-global-action-title-row {
+    spacing: 5px;
 }
 
 .fm-summary-note.fm-status-warning,
@@ -70,6 +61,20 @@
     background-color: rgba(255, 255, 255, 0.16);
 }
 
+.fm-global-action-button {
+    min-width: 0;
+    padding: 7px 10px 8px;
+}
+
+.fm-global-action-button-warning {
+    background-color: rgba(255, 214, 138, 0.12);
+    border: 1px solid rgba(255, 214, 138, 0.28);
+}
+
+.fm-global-action-button-warning:hover {
+    background-color: rgba(255, 214, 138, 0.18);
+}
+
 .fm-action-button StIcon,
 .fm-global-action-button StIcon {
     icon-size: 14px;
@@ -80,4 +85,14 @@
 .fm-path-button StLabel {
     font-size: 11px;
     font-weight: 600;
+}
+
+.fm-global-action-label {
+    color: rgba(255, 255, 255, 0.96);
+}
+
+.fm-global-action-subtitle {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.62);
+    text-align: center;
 }
