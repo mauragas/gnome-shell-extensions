@@ -12,7 +12,7 @@ test('buildProfileMenuActions exposes Sync now plus Pause for active profiles', 
 
     assert.equal(actions.syncAction.label, 'Sync now');
     assert.equal(actions.syncAction.iconName, 'view-refresh-symbolic');
-    assert.equal(actions.syncAction.methodName, 'RunProfile');
+    assert.equal(actions.syncAction.methodName, 'SyncProfile');
     assert.match(actions.syncAction.notification, /Triggered a sync/u);
 
     assert.equal(actions.controlAction.label, 'Pause');

@@ -346,7 +346,7 @@ export default class FolderMirrorExtension extends Extension {
         const canControlProfiles = profileCount > 0 && this._snapshot.helperState === 'running';
         const canResume = canControlProfiles && pausedCount > 0;
         const canPause = canControlProfiles && activeCount > 0;
-        const runSubtitle = profileCount === 0
+        const syncSubtitle = profileCount === 0
             ? 'No profiles'
             : `${this._snapshot.counts.healthy} healthy`;
         const pauseSubtitle = profileCount === 0
@@ -372,10 +372,10 @@ export default class FolderMirrorExtension extends Extension {
         const actions = [
             this._createGlobalActionButton(
                 'media-playback-start-symbolic',
-                'Run all',
-                runSubtitle,
+                'Sync all',
+                syncSubtitle,
                 async () => {
-                    await invokeHelperVoidMethod('RunAll');
+                    await invokeHelperVoidMethod('SyncAll');
                     this._notify('Triggered all enabled mirror profiles.');
                 },
                 {

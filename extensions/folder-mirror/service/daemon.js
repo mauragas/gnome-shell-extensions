@@ -435,41 +435,55 @@ class FolderMirrorDaemon {
     }
 
     _exportDbus() {
+        const handleSyncProfileInvocation = (parameters, invocation) => {
+            try {
+                const [profileId] = unpackDbusParameters(parameters);
+                const profile = this._assertProfileCanStartRun(profileId);
+                this._returnVoidInvocation(invocation);
+                this._invokeProfileRun(profileId, {
+                    dryRun: false,
+                    trigger: 'manual',
+                }).catch(error => {
+                    this._recordDetachedActionFailure(
+                        error,
+                        `Manual sync failed for ${profile.name}`
+                    );
+                });
+            } catch (error) {
+                invocation.return_dbus_error(DBUS_ERROR_NAME, error.message);
+            }
+        };
+
+        const handleSyncProfileDryRunInvocation = (parameters, invocation) => {
+            const [profileId] = unpackDbusParameters(parameters);
+            this._invokeProfileRun(profileId, {
+                dryRun: true,
+                trigger: 'manual-dry-run',
+            })
+                .then(result => {
+                    invocation.return_value(new GLib.Variant('(s)', [
+                        result.summary,
+                    ]));
+                })
+                .catch(error => {
+                    invocation.return_dbus_error(DBUS_ERROR_NAME, error.message);
+                });
+        };
+
+        const handleSyncAllInvocation = (_parameters, invocation) => {
+            this._returnVoidInvocation(invocation);
+            this._runAllProfiles({dryRun: false})
+                .catch(error => {
+                    this._recordDetachedActionFailure(error, 'Run-all sync failed');
+                });
+        };
+
         const implementation = {
             GetSnapshot: () => this._snapshotJson,
-            RunProfileAsync: (parameters, invocation) => {
-                try {
-                    const [profileId] = unpackDbusParameters(parameters);
-                    const profile = this._assertProfileCanStartRun(profileId);
-                    this._returnVoidInvocation(invocation);
-                    this._invokeProfileRun(profileId, {
-                        dryRun: false,
-                        trigger: 'manual',
-                    }).catch(error => {
-                        this._recordDetachedActionFailure(
-                            error,
-                            `Manual sync failed for ${profile.name}`
-                        );
-                    });
-                } catch (error) {
-                    invocation.return_dbus_error(DBUS_ERROR_NAME, error.message);
-                }
-            },
-            RunProfileDryRunAsync: (parameters, invocation) => {
-                const [profileId] = unpackDbusParameters(parameters);
-                this._invokeProfileRun(profileId, {
-                    dryRun: true,
-                    trigger: 'manual-dry-run',
-                })
-                    .then(result => {
-                        invocation.return_value(new GLib.Variant('(s)', [
-                            result.summary,
-                        ]));
-                    })
-                    .catch(error => {
-                        invocation.return_dbus_error(DBUS_ERROR_NAME, error.message);
-                    });
-            },
+            SyncProfileAsync: handleSyncProfileInvocation,
+            RunProfileAsync: handleSyncProfileInvocation,
+            SyncProfileDryRunAsync: handleSyncProfileDryRunInvocation,
+            RunProfileDryRunAsync: handleSyncProfileDryRunInvocation,
             PauseProfileAsync: (parameters, invocation) => {
                 try {
                     const [profileId] = unpackDbusParameters(parameters);
@@ -488,13 +502,8 @@ class FolderMirrorDaemon {
                     invocation.return_dbus_error(DBUS_ERROR_NAME, error.message);
                 }
             },
-            RunAllAsync: (_parameters, invocation) => {
-                this._returnVoidInvocation(invocation);
-                this._runAllProfiles({dryRun: false})
-                    .catch(error => {
-                        this._recordDetachedActionFailure(error, 'Run-all sync failed');
-                    });
-            },
+            SyncAllAsync: handleSyncAllInvocation,
+            RunAllAsync: handleSyncAllInvocation,
             PauseAllAsync: (_parameters, invocation) => {
                 try {
                     this._setAllProfilesPausedState(true);

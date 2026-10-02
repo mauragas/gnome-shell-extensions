@@ -48,14 +48,14 @@ export function buildProfileMenuActions(profile = {}, {
             ? {
                 iconName: 'emblem-synchronizing-symbolic',
                 label: buildSyncProgressLabel(syncAnimationFrame),
-                methodName: 'RunProfile',
+                methodName: 'SyncProfile',
                 notification: `Triggered a sync for ${profileName}.`,
                 enabled: false,
             }
             : {
                 iconName: 'view-refresh-symbolic',
                 label: 'Sync now',
-                methodName: 'RunProfile',
+                methodName: 'SyncProfile',
                 notification: `Triggered a sync for ${profileName}.`,
                 enabled: true,
             },

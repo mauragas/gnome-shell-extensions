@@ -57,7 +57,7 @@ sequenceDiagram
     participant State as status.json + daemon.log
 
    User->>Shell: Click Sync now
-    Shell->>Helper: RunProfile(profileId)
+      Shell->>Helper: SyncProfile(profileId)
     Helper->>Helper: Validate paths, dependencies, and safety checks
     Helper->>Backend: Execute sync command
     Backend-->>Helper: stdout/stderr + exit status
@@ -108,7 +108,7 @@ After installing, restart GNOME Shell if the extension is not visible yet:
 3. Configure a source path, target path, mode, and exclude rules.
    If the project is Git-based, leave **Exclude Git-ignored files** enabled to
    automatically exclude files that Git currently ignores via `.gitignore`.
-4. Use **Sync now** on an individual profile, or **Run all** to trigger a sync.
+4. Use **Sync now** on an individual profile, or **Sync all** to trigger a sync.
 5. For automatic syncing, keep the profile enabled with **Watch mode** turned on.
 
 The helper stores runtime diagnostics under:

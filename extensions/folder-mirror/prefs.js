@@ -741,7 +741,7 @@ export default class FolderMirrorPreferences extends ExtensionPreferences {
         this._populateEditor();
 
         const summary = await invokeHelperStringMethod(
-            'RunProfileDryRun',
+            'SyncProfileDryRun',
             new GLib.Variant('(s)', [editedProfile.id])
         );
         this._showMessage('Dry run output', summary);

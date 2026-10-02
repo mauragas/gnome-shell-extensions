@@ -44,8 +44,15 @@ export const SERVICE_DBUS_XML = `
         <method name="GetSnapshot">
             <arg type="s" name="snapshotJson" direction="out"/>
         </method>
+        <method name="SyncProfile">
+            <arg type="s" name="profileId" direction="in"/>
+        </method>
         <method name="RunProfile">
             <arg type="s" name="profileId" direction="in"/>
+        </method>
+        <method name="SyncProfileDryRun">
+            <arg type="s" name="profileId" direction="in"/>
+            <arg type="s" name="summary" direction="out"/>
         </method>
         <method name="RunProfileDryRun">
             <arg type="s" name="profileId" direction="in"/>
@@ -57,6 +64,7 @@ export const SERVICE_DBUS_XML = `
         <method name="ResumeProfile">
             <arg type="s" name="profileId" direction="in"/>
         </method>
+        <method name="SyncAll"/>
         <method name="RunAll"/>
         <method name="PauseAll"/>
         <method name="ResumeAll"/>
@@ -66,6 +74,12 @@ export const SERVICE_DBUS_XML = `
         </signal>
     </interface>
 </node>`;
+
+const HELPER_METHOD_FALLBACKS = Object.freeze({
+    SyncProfile: 'RunProfile',
+    SyncProfileDryRun: 'RunProfileDryRun',
+    SyncAll: 'RunAll',
+});
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
@@ -273,6 +287,23 @@ export async function callHelperMethod(methodName, parameters = null, replyType 
     );
 }
 
+function isUnknownHelperMethodError(error) {
+    const message = error?.message ?? '';
+    return /UnknownMethod|No such method/iu.test(message);
+}
+
+async function callHelperMethodWithFallback(methodName, parameters = null, replyType = null, timeoutMs = 4000) {
+    try {
+        return await callHelperMethod(methodName, parameters, replyType, timeoutMs);
+    } catch (error) {
+        const legacyMethodName = HELPER_METHOD_FALLBACKS[methodName];
+        if (!legacyMethodName || !isUnknownHelperMethodError(error))
+            throw error;
+
+        return callHelperMethod(legacyMethodName, parameters, replyType, timeoutMs);
+    }
+}
+
 export async function getHelperSnapshot(timeoutMs = 1500) {
     try {
         const result = await callHelperMethod(
@@ -289,11 +320,11 @@ export async function getHelperSnapshot(timeoutMs = 1500) {
 }
 
 export async function invokeHelperVoidMethod(methodName, parameters = null, timeoutMs = 4000) {
-    await callHelperMethod(methodName, parameters, null, timeoutMs);
+    await callHelperMethodWithFallback(methodName, parameters, null, timeoutMs);
 }
 
 export async function invokeHelperStringMethod(methodName, parameters = null, timeoutMs = 4000) {
-    const result = await callHelperMethod(
+    const result = await callHelperMethodWithFallback(
         methodName,
         parameters,
         new GLib.VariantType('(s)'),
