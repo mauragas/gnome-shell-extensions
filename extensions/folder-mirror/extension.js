@@ -182,28 +182,7 @@ export default class FolderMirrorExtension extends Extension {
 
         menu.addMenuItem(this._createHeaderItem());
         menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        menu.addMenuItem(this._createSimpleActionItem('Run all now', async () => {
-            await invokeHelperVoidMethod('RunAll');
-            this._notify('Triggered all enabled mirror profiles.');
-        }));
-        menu.addMenuItem(this._createSimpleActionItem('Pause all', async () => {
-            await invokeHelperVoidMethod('PauseAll');
-            this._notify('Paused all enabled mirror profiles.');
-        }));
-        menu.addMenuItem(this._createSimpleActionItem('Resume all', async () => {
-            await invokeHelperVoidMethod('ResumeAll');
-            this._notify('Resumed mirror profiles.');
-        }));
-        menu.addMenuItem(this._createSimpleActionItem('Open Preferences', async () => {
-            this.openPreferences();
-        }));
-        menu.addMenuItem(this._createSimpleActionItem('Open Logs', async () => {
-            openPath(getLogDir());
-        }));
-        menu.addMenuItem(this._createSimpleActionItem('Restart Helper', async () => {
-            await invokeHelperVoidMethod('RestartHelper');
-            this._notify('Requested helper restart.');
-        }));
+        menu.addMenuItem(this._createGlobalActionsItem());
 
         if (this._snapshot.profiles.length > 0)
             menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
@@ -228,6 +207,7 @@ export default class FolderMirrorExtension extends Extension {
         const box = new St.BoxLayout({
             vertical: true,
             x_expand: true,
+            x_align: Clutter.ActorAlign.CENTER,
             style_class: 'fm-summary-box',
         });
         item.add_child(box);
@@ -235,28 +215,138 @@ export default class FolderMirrorExtension extends Extension {
         box.add_child(new St.Label({
             text: EXTENSION_TITLE,
             style_class: 'fm-summary-title',
-            x_align: Clutter.ActorAlign.START,
+            x_expand: true,
+            x_align: Clutter.ActorAlign.CENTER,
         }));
 
         box.add_child(new St.Label({
             text: buildHelperStateLabel(this._snapshot),
             style_class: 'fm-summary-subtitle',
-            x_align: Clutter.ActorAlign.START,
+            x_expand: true,
+            x_align: Clutter.ActorAlign.CENTER,
         }));
 
         box.add_child(new St.Label({
             text: buildSnapshotSummary(this._snapshot),
             style_class: 'fm-summary-note',
-            x_align: Clutter.ActorAlign.START,
+            x_expand: true,
+            x_align: Clutter.ActorAlign.CENTER,
         }));
 
         if (this._snapshot.recentErrors[0]) {
             box.add_child(new St.Label({
                 text: this._snapshot.recentErrors[0],
                 style_class: 'fm-summary-note fm-status-error',
-                x_align: Clutter.ActorAlign.START,
+                x_expand: true,
+                x_align: Clutter.ActorAlign.CENTER,
             }));
         }
+
+        return item;
+    }
+
+    _createGlobalActionsItem() {
+        const item = new PopupMenu.PopupBaseMenuItem({
+            reactive: false,
+            can_focus: false,
+        });
+
+        const layoutManager = new Clutter.GridLayout({
+            orientation: Clutter.Orientation.VERTICAL,
+            column_spacing: 8,
+            row_spacing: 8,
+        });
+        layoutManager.column_homogeneous = true;
+
+        const container = new St.Widget({
+            layout_manager: layoutManager,
+            x_expand: true,
+            style_class: 'fm-global-actions',
+        });
+        item.add_child(container);
+
+        const actions = [
+            this._createActionButton(
+                'media-playback-start-symbolic',
+                'Run all',
+                async () => {
+                    await invokeHelperVoidMethod('RunAll');
+                    this._notify('Triggered all enabled mirror profiles.');
+                },
+                {
+                    styleClass: 'fm-global-action-button',
+                    expand: true,
+                    centerContent: true,
+                }
+            ),
+            this._createActionButton(
+                'media-playback-pause-symbolic',
+                'Pause all',
+                async () => {
+                    await invokeHelperVoidMethod('PauseAll');
+                    this._notify('Paused all enabled mirror profiles.');
+                },
+                {
+                    styleClass: 'fm-global-action-button',
+                    expand: true,
+                    centerContent: true,
+                }
+            ),
+            this._createActionButton(
+                'media-playback-start-symbolic',
+                'Resume all',
+                async () => {
+                    await invokeHelperVoidMethod('ResumeAll');
+                    this._notify('Resumed mirror profiles.');
+                },
+                {
+                    styleClass: 'fm-global-action-button',
+                    expand: true,
+                    centerContent: true,
+                }
+            ),
+            this._createActionButton(
+                'emblem-system-symbolic',
+                'Preferences',
+                async () => {
+                    this.openPreferences();
+                },
+                {
+                    styleClass: 'fm-global-action-button',
+                    expand: true,
+                    centerContent: true,
+                }
+            ),
+            this._createActionButton(
+                'text-x-log-symbolic',
+                'Logs',
+                async () => {
+                    openPath(getLogDir());
+                },
+                {
+                    styleClass: 'fm-global-action-button',
+                    expand: true,
+                    centerContent: true,
+                }
+            ),
+            this._createActionButton(
+                'view-refresh-symbolic',
+                'Restart',
+                async () => {
+                    await invokeHelperVoidMethod('RestartHelper');
+                    this._notify('Requested helper restart.');
+                },
+                {
+                    styleClass: 'fm-global-action-button',
+                    expand: true,
+                    centerContent: true,
+                }
+            ),
+        ];
+
+        actions.forEach((button, index) => {
+            layoutManager.attach(button, index % 3, Math.floor(index / 3), 1, 1);
+        });
 
         return item;
     }
@@ -271,15 +361,28 @@ export default class FolderMirrorExtension extends Extension {
         return item;
     }
 
-    _createActionButton(iconName, label, action) {
+    _createActionButton(iconName, label, action, options = {}) {
+        const normalizedOptions = typeof options === 'string'
+            ? {styleClass: options}
+            : options;
+        const {
+            styleClass = 'fm-action-button',
+            expand = false,
+            centerContent = false,
+        } = normalizedOptions;
         const button = new St.Button({
-            style_class: 'fm-action-button',
+            style_class: styleClass,
             can_focus: true,
             reactive: true,
             track_hover: true,
+            x_expand: expand,
         });
         const content = new St.BoxLayout({
             style_class: 'fm-action-content',
+            x_expand: !centerContent,
+            x_align: centerContent
+                ? Clutter.ActorAlign.CENTER
+                : Clutter.ActorAlign.FILL,
             y_align: Clutter.ActorAlign.CENTER,
         });
         content.add_child(new St.Icon({
@@ -289,6 +392,10 @@ export default class FolderMirrorExtension extends Extension {
         content.add_child(new St.Label({
             text: label,
             style_class: 'fm-action-label',
+            x_expand: !centerContent,
+            x_align: centerContent
+                ? Clutter.ActorAlign.CENTER
+                : Clutter.ActorAlign.FILL,
             y_align: Clutter.ActorAlign.CENTER,
         }));
         button.set_child(content);

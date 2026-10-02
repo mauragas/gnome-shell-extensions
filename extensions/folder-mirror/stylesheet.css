@@ -5,6 +5,7 @@
 
 .fm-summary-title {
     font-weight: 700;
+    text-align: center;
 }
 
 .fm-summary-subtitle,
@@ -15,8 +16,17 @@
     font-size: 12px;
 }
 
+.fm-summary-subtitle,
+.fm-summary-note {
+    text-align: center;
+}
+
 .fm-action-content {
     spacing: 4px;
+}
+
+.fm-global-actions {
+    padding: 0 0 4px;
 }
 
 .fm-summary-note.fm-status-warning,
@@ -47,6 +57,7 @@
 }
 
 .fm-action-button,
+.fm-global-action-button,
 .fm-path-button {
     border-radius: 999px;
     padding: 4px 8px;
@@ -54,14 +65,17 @@
 }
 
 .fm-action-button:hover,
+.fm-global-action-button:hover,
 .fm-path-button:hover {
     background-color: rgba(255, 255, 255, 0.16);
 }
 
-.fm-action-button StIcon {
+.fm-action-button StIcon,
+.fm-global-action-button StIcon {
     icon-size: 14px;
 }
 
+.fm-global-action-button StLabel,
 .fm-action-button StLabel,
 .fm-path-button StLabel {
     font-size: 11px;
