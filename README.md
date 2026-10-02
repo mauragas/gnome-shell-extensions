@@ -26,11 +26,13 @@ Supporting files such as `prefs.js`, `shared.js`, `lib/`, `ui/`, `tests/`, and a
 
 | Extension | UUID | GNOME Shell | Folder | Notes |
 | --- | --- | --- | --- | --- |
+| Folder Mirror | `folder-mirror` | 46–48 | `extensions/folder-mirror/` | Mirror local development folders with rsync/Unison from the top bar |
 | Monitor Layout Switcher | `monitor-layout-switcher` | 46–48 | `extensions/monitor-layout-switcher/` | Switch between saved multi-monitor layouts from the top bar |
 | Razer Keyboard RGB Control | `razer-keyboard-rgb-control` | 46–48 | `extensions/razer-keyboard-rgb-control/` | OpenRazer-powered RGB presets and per-key control for the Razer BlackWidow V3 Tenkeyless |
 
 Per-extension usage and troubleshooting notes live next to the source:
 
+- [`extensions/folder-mirror/README.md`](extensions/folder-mirror/README.md)
 - [`extensions/monitor-layout-switcher/README.md`](extensions/monitor-layout-switcher/README.md)
 - [`extensions/razer-keyboard-rgb-control/README.md`](extensions/razer-keyboard-rgb-control/README.md)
 
@@ -39,6 +41,11 @@ Per-extension usage and troubleshooting notes live next to the source:
 From the extension directory you want to use:
 
 ```bash
+cd extensions/folder-mirror
+./install.sh
+
+# or
+
 cd extensions/monitor-layout-switcher
 ./install.sh
 ```

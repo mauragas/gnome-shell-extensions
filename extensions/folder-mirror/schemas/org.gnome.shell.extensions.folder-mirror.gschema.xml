@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.folder-mirror"
+          path="/org/gnome/shell/extensions/folder-mirror/">
+
+    <key name="profiles-json" type="s">
+      <default>''</default>
+      <summary>Saved folder mirror profiles</summary>
+      <description>JSON array storing the configured folder mirror profiles.</description>
+    </key>
+
+    <key name="global-excludes-json" type="s">
+      <default>''</default>
+      <summary>Global exclude rules</summary>
+      <description>JSON array storing the default exclude rules applied to new profiles.</description>
+    </key>
+
+    <key name="show-indicator" type="b">
+      <default>true</default>
+      <summary>Show the panel indicator</summary>
+      <description>Whether the Folder Mirror top-bar indicator is visible.</description>
+    </key>
+
+    <key name="show-notifications" type="b">
+      <default>true</default>
+      <summary>Show notifications</summary>
+      <description>Whether manual runs and helper errors can trigger GNOME Shell notifications.</description>
+    </key>
+
+    <key name="auto-start-helper" type="b">
+      <default>true</default>
+      <summary>Auto-start helper logic</summary>
+      <description>Whether the helper should automatically schedule watch-mode and run-at-login profiles.</description>
+    </key>
+
+    <key name="watch-interval-seconds" type="u">
+      <default>10</default>
+      <summary>Watch interval in seconds</summary>
+      <description>Fallback polling interval used by the helper watch scheduler.</description>
+    </key>
+
+    <key name="log-level" type="s">
+      <default>'info'</default>
+      <summary>Helper log level</summary>
+      <description>Logging verbosity used by the background helper.</description>
+    </key>
+
+  </schema>
+</schemalist>

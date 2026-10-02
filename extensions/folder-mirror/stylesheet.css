@@ -1,0 +1,68 @@
+.fm-summary-box {
+    spacing: 4px;
+    padding: 6px 0;
+}
+
+.fm-summary-title {
+    font-weight: 700;
+}
+
+.fm-summary-subtitle,
+.fm-summary-note,
+.fm-profile-subtitle,
+.fm-profile-path {
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 0.92em;
+.fm-action-content {
+    spacing: 4px;
+}
+}
+
+.fm-summary-note.fm-status-warning,
+.fm-profile-subtitle.fm-status-warning {
+    color: #f9cf58;
+}
+
+.fm-summary-note.fm-status-error,
+.fm-profile-subtitle.fm-status-error {
+    color: #ff8a80;
+}
+
+.fm-profile-row {
+    spacing: 10px;
+    padding: 4px 0;
+}
+
+.fm-action-button StLabel,
+.fm-profile-text {
+    spacing: 2px;
+}
+
+.fm-profile-title {
+    font-weight: 600;
+}
+
+.fm-profile-actions {
+    spacing: 6px;
+}
+
+.fm-action-button,
+.fm-path-button {
+    border-radius: 999px;
+    padding: 4px 8px;
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.fm-action-button:hover,
+.fm-path-button:hover {
+    background-color: rgba(255, 255, 255, 0.16);
+}
+
+.fm-action-button StIcon {
+    icon-size: 14px;
+}
+
+.fm-path-button StLabel {
+    font-size: 0.88em;
+    font-weight: 600;
+}
