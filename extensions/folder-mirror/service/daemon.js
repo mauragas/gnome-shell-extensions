@@ -37,6 +37,11 @@ import {
     isOneWayMode,
     isTwoWayMode,
 } from '../lib/validation.js';
+import {
+    deriveRuntimeStatus,
+    didSyncProduceVisibleChanges,
+    updateWatchRunState,
+} from '../lib/watch-state.js';
 import {buildRsyncCommand, resolveRsyncEndpoints} from './backends/rsync.js';
 import {
     createGitIgnoredExcludeRules,
@@ -247,16 +252,15 @@ class FolderMirrorDaemon {
     }
 
     _deriveRestingStatus(profile, runtimeEntry) {
-        if (profile.paused || !profile.enabled)
-            return 'paused';
-
-        if (runtimeEntry?.status === 'error' || runtimeEntry?.status === 'conflict')
-            return runtimeEntry.status;
-
-        if (profile.watchMode && this._config.autoStartHelper)
-            return 'watching';
-
-        return 'idle';
+        return deriveRuntimeStatus({
+            active: this._activeRuns.has(profile.id) && Boolean(runtimeEntry?.showSyncWhileRunning),
+            enabled: profile.enabled,
+            paused: profile.paused,
+            watchMode: profile.watchMode,
+            autoStartHelper: this._config.autoStartHelper,
+            previousStatus: runtimeEntry?.status ?? 'idle',
+            syncPulseUntil: runtimeEntry?.syncPulseUntil ?? 0,
+        });
     }
 
     _syncRuntimeProfiles() {
@@ -282,11 +286,32 @@ class FolderMirrorDaemon {
                 lastError: previousEntry?.lastError ?? null,
                 lastConflictSummary: previousEntry?.lastConflictSummary ?? null,
                 nextWatchAt: previousEntry?.nextWatchAt ?? 0,
+                consecutiveNoChangeRuns: previousEntry?.consecutiveNoChangeRuns ?? 0,
+                syncPulseUntil: previousEntry?.syncPulseUntil ?? 0,
+                showSyncWhileRunning: previousEntry?.showSyncWhileRunning ?? false,
             };
             nextRuntimeProfiles.set(profile.id, nextEntry);
         }
 
         this._runtimeProfiles = nextRuntimeProfiles;
+    }
+
+    _refreshRuntimeStatuses() {
+        let didChange = false;
+
+        for (const profile of this._profiles) {
+            const runtimeEntry = this._runtimeProfiles.get(profile.id);
+            if (!runtimeEntry)
+                continue;
+
+            const nextStatus = this._deriveRestingStatus(profile, runtimeEntry);
+            if (runtimeEntry.status !== nextStatus) {
+                runtimeEntry.status = nextStatus;
+                didChange = true;
+            }
+        }
+
+        return didChange;
     }
 
     _getProfileRuntimeEntry(profileId) {
@@ -309,7 +334,8 @@ class FolderMirrorDaemon {
                 dryRun: false,
                 trigger: 'startup',
             }).catch(error => {
-                this._log('error', `Startup run failed for ${profile.name}: ${error.message}`);
+                if (!error?._folderMirrorLogged)
+                    this._log('error', `Startup run failed for ${profile.name}: ${error.message}`);
             });
         }
     }
@@ -333,8 +359,12 @@ class FolderMirrorDaemon {
     }
 
     async _pollWatchProfiles() {
-        if (this._watchPollInFlight || !this._config.autoStartHelper)
+        const didStatusChangeBeforePolling = this._refreshRuntimeStatuses();
+        if (this._watchPollInFlight || !this._config.autoStartHelper) {
+            if (didStatusChangeBeforePolling)
+                this._publishSnapshot();
             return;
+        }
 
         this._watchPollInFlight = true;
         try {
@@ -358,11 +388,14 @@ class FolderMirrorDaemon {
                     dryRun: false,
                     trigger: 'watch',
                 }).catch(error => {
-                    this._log('error', `Watch run failed for ${profile.name}: ${error.message}`);
+                    if (!error?._folderMirrorLogged)
+                        this._log('error', `Watch run failed for ${profile.name}: ${error.message}`);
                 });
             }
         } finally {
             this._watchPollInFlight = false;
+            if (didStatusChangeBeforePolling)
+                this._publishSnapshot();
         }
     }
 
@@ -714,11 +747,13 @@ class FolderMirrorDaemon {
         const runtimeEntry = this._getProfileRuntimeEntry(profileId);
         this._activeRuns.add(profileId);
         if (runtimeEntry) {
-            runtimeEntry.status = 'syncing';
+            runtimeEntry.showSyncWhileRunning = trigger !== 'watch';
+            runtimeEntry.status = runtimeEntry.showSyncWhileRunning
+                ? 'syncing'
+                : this._deriveRestingStatus(profile, runtimeEntry);
             runtimeEntry.lastRunAt = new Date().toISOString();
             runtimeEntry.lastError = null;
             runtimeEntry.lastConflictSummary = null;
-            runtimeEntry.nextWatchAt = Date.now() + this._config.watchIntervalSeconds * 1000;
         }
         this._publishSnapshot();
 
@@ -755,11 +790,15 @@ class FolderMirrorDaemon {
             });
             if (command.profilePreview)
                 this._log('debug', `${profile.name} profile preview:\n${command.profilePreview}`);
-            this._log('info', `Running ${trigger} sync for ${profile.name}: ${this._formatCommand(command)}`);
+            if (trigger === 'watch')
+                this._log('debug', `Checking watch sync for ${profile.name}: ${this._formatCommand(command)}`);
+            else
+                this._log('info', `Running ${trigger} sync for ${profile.name}: ${this._formatCommand(command)}`);
 
             const processResult = await this._runProcess(command);
             const conflictSummary = this._detectConflictSummary(processResult);
             const finishedAt = new Date().toISOString();
+            const hadVisibleChanges = didSyncProduceVisibleChanges(processResult);
 
             if (runtimeEntry) {
                 runtimeEntry.lastRunAt = finishedAt;
@@ -782,18 +821,40 @@ class FolderMirrorDaemon {
                 runtimeEntry.lastError = null;
                 if (!dryRun)
                     runtimeEntry.lastSuccessfulSyncAt = finishedAt;
+                if (!dryRun) {
+                    const watchState = updateWatchRunState(runtimeEntry, {
+                        trigger,
+                        hadChanges: hadVisibleChanges,
+                        baseIntervalSeconds: this._config.watchIntervalSeconds,
+                    });
+                    runtimeEntry.consecutiveNoChangeRuns = watchState.consecutiveNoChangeRuns;
+                    runtimeEntry.nextWatchAt = watchState.nextWatchAt;
+                    runtimeEntry.syncPulseUntil = watchState.syncPulseUntil;
+                }
+                runtimeEntry.showSyncWhileRunning = false;
                 runtimeEntry.status = conflictSummary
                     ? 'conflict'
-                    : this._deriveRestingStatus(profile, runtimeEntry);
+                    : deriveRuntimeStatus({
+                        enabled: profile.enabled,
+                        paused: profile.paused,
+                        watchMode: profile.watchMode,
+                        autoStartHelper: this._config.autoStartHelper,
+                        previousStatus: 'idle',
+                        syncPulseUntil: runtimeEntry.syncPulseUntil ?? 0,
+                    });
             }
 
             const dryRunSummary = this._buildDryRunSummary(profile, processResult);
-            this._log(
-                'info',
-                dryRun
-                    ? `Dry run completed for ${profile.name}.`
-                    : `Sync completed for ${profile.name}.`
-            );
+            if (dryRun) {
+                this._log('info', `Dry run completed for ${profile.name}.`);
+            } else if (trigger === 'watch') {
+                if (hadVisibleChanges)
+                    this._log('info', `Applied watched changes for ${profile.name}.`);
+                else
+                    this._log('debug', `No watched changes detected for ${profile.name}.`);
+            } else {
+                this._log('info', `Sync completed for ${profile.name}.`);
+            }
 
             return {
                 ...processResult,
@@ -804,11 +865,15 @@ class FolderMirrorDaemon {
             if (runtimeEntry) {
                 runtimeEntry.lastRunAt = runtimeEntry.lastRunAt ?? new Date().toISOString();
                 runtimeEntry.lastError = failureMessage;
+                runtimeEntry.showSyncWhileRunning = false;
+                runtimeEntry.consecutiveNoChangeRuns = 0;
+                runtimeEntry.nextWatchAt = Date.now() + this._config.watchIntervalSeconds * 1000;
                 runtimeEntry.status = 'error';
             }
 
             this._rememberError(`${profile.name}: ${failureMessage}`);
             this._log('error', `${profile.name} failed: ${failureMessage}`);
+            error._folderMirrorLogged = true;
             throw error;
         } finally {
             this._activeRuns.delete(profileId);

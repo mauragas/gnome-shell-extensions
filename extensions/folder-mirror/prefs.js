@@ -237,10 +237,14 @@ export default class FolderMirrorPreferences extends ExtensionPreferences {
             spacing: 8,
             margin_top: 8,
             margin_bottom: 4,
+            hexpand: true,
+            homogeneous: true,
         });
         editorGroup.add(editorButtons);
         this._saveButton = this._createTextButton('Save changes', () => this._saveSelectedProfile());
         this._revertButton = this._createTextButton('Revert', () => this._populateEditor());
+        this._saveButton.set_hexpand(true);
+        this._revertButton.set_hexpand(true);
         editorButtons.append(this._saveButton);
         editorButtons.append(this._revertButton);
 
@@ -324,10 +328,16 @@ export default class FolderMirrorPreferences extends ExtensionPreferences {
             spacing: 8,
             margin_top: 6,
             margin_bottom: 4,
+            hexpand: true,
+            homogeneous: true,
         });
         excludesGroup.add(buttons);
-        buttons.append(this._createTextButton('Save defaults', () => this._saveDefaults()));
-        buttons.append(this._createTextButton('Restore development defaults', () => this._restoreDefaultGlobalExcludes()));
+        const saveDefaultsButton = this._createTextButton('Save defaults', () => this._saveDefaults());
+        const restoreDefaultsButton = this._createTextButton('Restore defaults', () => this._restoreDefaultGlobalExcludes());
+        saveDefaultsButton.set_hexpand(true);
+        restoreDefaultsButton.set_hexpand(true);
+        buttons.append(saveDefaultsButton);
+        buttons.append(restoreDefaultsButton);
     }
 
     _buildDiagnosticsPage(window) {
@@ -342,15 +352,23 @@ export default class FolderMirrorPreferences extends ExtensionPreferences {
         });
         page.add(statusGroup);
 
-        this._helperStateLabel = new Gtk.Label({xalign: 0, wrap: true, selectable: true});
-        this._helperSummaryLabel = new Gtk.Label({xalign: 0, wrap: true, selectable: true});
-        this._dependenciesLabel = new Gtk.Label({xalign: 0, wrap: true, selectable: true});
-        this._recentErrorsLabel = new Gtk.Label({xalign: 0, wrap: true, selectable: true});
+        this._helperStateRow = this._createStaticInfoRow('State', 'Checking helper state…', {
+            subtitleLines: 2,
+        });
+        this._helperSummaryRow = this._createStaticInfoRow('Summary', 'Collecting live helper summary…', {
+            subtitleLines: 3,
+        });
+        this._dependenciesRow = this._createStaticInfoRow('Dependencies', 'Detecting runtime dependencies…', {
+            subtitleLines: 8,
+        });
+        this._recentErrorsRow = this._createStaticInfoRow('Recent errors', 'No recent errors reported.', {
+            subtitleLines: 6,
+        });
 
-        statusGroup.add(this._createStaticInfoRow('State', this._helperStateLabel));
-        statusGroup.add(this._createStaticInfoRow('Summary', this._helperSummaryLabel));
-        statusGroup.add(this._createStaticInfoRow('Dependencies', this._dependenciesLabel));
-        statusGroup.add(this._createStaticInfoRow('Recent errors', this._recentErrorsLabel));
+        statusGroup.add(this._helperStateRow);
+        statusGroup.add(this._helperSummaryRow);
+        statusGroup.add(this._dependenciesRow);
+        statusGroup.add(this._recentErrorsRow);
 
         const actionsGroup = new Adw.PreferencesGroup({
             title: 'Actions',
@@ -361,17 +379,23 @@ export default class FolderMirrorPreferences extends ExtensionPreferences {
             spacing: 8,
             margin_top: 6,
             margin_bottom: 4,
+            hexpand: true,
+            homogeneous: true,
         });
         actionsGroup.add(actions);
-        actions.append(this._createTextButton('Refresh', () => {
+        const refreshButton = this._createTextButton('Refresh', () => {
             this._refreshDiagnostics().catch(error => this._showMessage('Diagnostics refresh failed', error.message));
-        }));
-        actions.append(this._createTextButton('Restart helper', () => {
+        });
+        const restartButton = this._createTextButton('Restart helper', () => {
             this._restartHelper().catch(error => this._showMessage('Restart failed', error.message));
-        }));
-        actions.append(this._createTextButton('Open state directory', () => {
+        });
+        const openStateDirButton = this._createTextButton('Open state directory', () => {
             openPath(getStateRoot());
-        }));
+        });
+        for (const button of [refreshButton, restartButton, openStateDirButton]) {
+            button.set_hexpand(true);
+            actions.append(button);
+        }
     }
 
     _createTextButton(label, action) {
@@ -393,11 +417,16 @@ export default class FolderMirrorPreferences extends ExtensionPreferences {
         return row;
     }
 
-    _createStaticInfoRow(title, widget) {
+    _createStaticInfoRow(title, value, {
+        subtitleLines = 4,
+    } = {}) {
         const row = new Adw.ActionRow({
             title,
+            subtitle: value,
+            activatable: false,
         });
-        row.add_suffix(widget);
+        row.subtitle_lines = subtitleLines;
+        row.title_lines = 1;
         return row;
     }
 
@@ -755,12 +784,12 @@ export default class FolderMirrorPreferences extends ExtensionPreferences {
 
     async _refreshDiagnostics() {
         const snapshot = await getHelperSnapshot();
-        this._helperStateLabel.set_label(snapshot.helperState);
-        this._helperSummaryLabel.set_label(
+        this._helperStateRow.subtitle = snapshot.helperState;
+        this._helperSummaryRow.subtitle = (
             `${snapshot.counts.healthy} healthy • ${snapshot.counts.syncing} syncing • ${snapshot.counts.paused} paused • ${snapshot.counts.error} attention`
         );
-        this._dependenciesLabel.set_label(formatDependencySummary(snapshot) || 'No dependency information reported yet.');
-        this._recentErrorsLabel.set_label(snapshot.recentErrors.join('\n') || 'No recent errors reported.');
+        this._dependenciesRow.subtitle = formatDependencySummary(snapshot) || 'No dependency information reported yet.';
+        this._recentErrorsRow.subtitle = snapshot.recentErrors.join('\n') || 'No recent errors reported.';
     }
 
     _showMessage(title, body) {
