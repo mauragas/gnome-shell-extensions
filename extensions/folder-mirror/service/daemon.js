@@ -800,6 +800,7 @@ class FolderMirrorDaemon {
         const profile = this._assertProfileCanStartRun(profileId);
 
         const runtimeEntry = this._getProfileRuntimeEntry(profileId);
+        let processFailureStatus = 'error';
         this._activeRuns.add(profileId);
         if (runtimeEntry) {
             runtimeEntry.showSyncWhileRunning = trigger !== 'watch';
@@ -863,13 +864,13 @@ class FolderMirrorDaemon {
             if (!processResult.ok) {
                 const failureMessage = this._trimOutput(processResult.stderr || processResult.stdout) ||
                     `${profile.name} exited with status ${processResult.exitStatus}.`;
+                processFailureStatus = conflictSummary ? 'conflict' : 'error';
                 if (runtimeEntry) {
-                    runtimeEntry.status = conflictSummary ? 'conflict' : 'error';
                     runtimeEntry.lastError = failureMessage;
                 }
-                this._rememberError(`${profile.name}: ${failureMessage}`);
-                this._log('error', `${profile.name} failed: ${failureMessage}`);
-                throw new Error(failureMessage);
+                const processError = new Error(failureMessage);
+                processError._folderMirrorStatus = processFailureStatus;
+                throw processError;
             }
 
             if (runtimeEntry) {
@@ -923,7 +924,7 @@ class FolderMirrorDaemon {
                 runtimeEntry.showSyncWhileRunning = false;
                 runtimeEntry.consecutiveNoChangeRuns = 0;
                 runtimeEntry.nextWatchAt = Date.now() + this._config.watchIntervalSeconds * 1000;
-                runtimeEntry.status = 'error';
+                runtimeEntry.status = error?._folderMirrorStatus ?? processFailureStatus;
             }
 
             this._rememberError(`${profile.name}: ${failureMessage}`);

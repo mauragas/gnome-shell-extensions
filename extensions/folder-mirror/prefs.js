@@ -7,7 +7,6 @@ import {ExtensionPreferences}
     from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 import {
-    EXTENSION_TITLE,
     SETTINGS_SCHEMA_ID,
     SYSTEMD_UNIT_NAME,
     formatDependencySummary,

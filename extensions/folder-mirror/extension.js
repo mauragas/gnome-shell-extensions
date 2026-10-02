@@ -462,16 +462,6 @@ export default class FolderMirrorExtension extends Extension {
         return item;
     }
 
-    _createSimpleActionItem(label, action) {
-        const item = new PopupMenu.PopupMenuItem(label);
-        item.connect('activate', () => {
-            Promise.resolve(action()).catch(error => {
-                this._notify(error.message, true);
-            });
-        });
-        return item;
-    }
-
     _createActionButton(iconName, label, action, options = {}) {
         const normalizedOptions = typeof options === 'string'
             ? {styleClass: options}
