@@ -1,0 +1,8 @@
+{
+    "uuid": "folder-mirror",
+    "name": "Folder Mirror",
+    "description": "Mirror development folders with rsync and Unison from the GNOME Shell top bar.",
+    "shell-version": ["46", "47", "48"],
+    "settings-schema": "org.gnome.shell.extensions.folder-mirror",
+    "url": "https://github.com/mauragas/gnome-shell-extensions/tree/main/extensions/folder-mirror"
+}
