@@ -5,6 +5,7 @@ import {
     buildUnisonCommand,
     buildUnisonConflictArguments,
     buildUnisonProfilePreview,
+    isUnisonArchiveCorruptionError,
 } from '../service/backends/unison.js';
 
 const sampleProfile = {
@@ -78,4 +79,28 @@ test('buildUnisonCommand keeps extra excludes even when normal global excludes a
 
     assert.equal(command.argv.includes('Name .git'), false);
     assert.ok(command.argv.includes('Path node_modules'));
+});
+
+test('buildUnisonCommand adds -ignorearchives when asked to rebuild a corrupt archive', () => {
+    const defaultCommand = buildUnisonCommand(sampleProfile);
+    assert.equal(defaultCommand.argv.includes('-ignorearchives'), false);
+
+    const recoveryCommand = buildUnisonCommand(sampleProfile, {ignoreArchives: true});
+    assert.ok(recoveryCommand.argv.includes('-ignorearchives'));
+    assert.match(recoveryCommand.profilePreview, /ignorearchives = true/u);
+});
+
+test('isUnisonArchiveCorruptionError detects unison archive loading failures', () => {
+    assert.equal(isUnisonArchiveCorruptionError(
+        'Fatal error: End_of_file exception raised in loading archive (this indicates a bug!)'
+    ), true);
+    assert.equal(isUnisonArchiveCorruptionError(
+        'Uncaught exception input_value: bad object'
+    ), true);
+    assert.equal(isUnisonArchiveCorruptionError(
+        'The archive file /home/user/.unison/ar1234 is corrupt'
+    ), true);
+    assert.equal(isUnisonArchiveCorruptionError(''), false);
+    assert.equal(isUnisonArchiveCorruptionError(null), false);
+    assert.equal(isUnisonArchiveCorruptionError('Synchronization complete at 12:00:00'), false);
 });

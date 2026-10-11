@@ -49,7 +49,10 @@ import {
     listIgnoredRelativePathsForTree,
     resolveGitIgnoreReferenceRoot,
 } from './gitignore-resolver.js';
-import {buildUnisonCommand} from './backends/unison.js';
+import {
+    buildUnisonCommand,
+    isUnisonArchiveCorruptionError,
+} from './backends/unison.js';
 
 Gio._promisify(Gio.Subprocess.prototype, 'communicate_utf8_async', 'communicate_utf8_finish');
 
@@ -692,12 +695,13 @@ class FolderMirrorDaemon {
         }
     }
 
-    _buildCommand(profile, {dryRun = false, extraExcludeRules = []} = {}) {
+    _buildCommand(profile, {dryRun = false, extraExcludeRules = [], ignoreArchives = false} = {}) {
         if (isTwoWayMode(profile.mode)) {
             return buildUnisonCommand(profile, {
                 globalExcludes: this._globalExcludes,
                 extraExcludeRules,
                 dryRun,
+                ignoreArchives,
             });
         }
 
@@ -706,6 +710,27 @@ class FolderMirrorDaemon {
             extraExcludeRules,
             dryRun,
         });
+    }
+
+    async _runSyncCommand(profile, {
+        dryRun = false,
+        extraExcludeRules = [],
+        trigger = 'manual',
+        ignoreArchives = false,
+    } = {}) {
+        const command = this._buildCommand(profile, {
+            dryRun,
+            extraExcludeRules,
+            ignoreArchives,
+        });
+        if (command.profilePreview)
+            this._log('debug', `${profile.name} profile preview:\n${command.profilePreview}`);
+        if (trigger === 'watch')
+            this._log('debug', `Checking watch sync for ${profile.name}: ${this._formatCommand(command)}`);
+        else
+            this._log('info', `Running ${trigger} sync for ${profile.name}: ${this._formatCommand(command)}`);
+
+        return this._runProcess(command);
     }
 
     async _runProcess(command) {
@@ -840,18 +865,27 @@ class FolderMirrorDaemon {
                 };
             }
 
-            const command = this._buildCommand(profile, {
+            let processResult = await this._runSyncCommand(profile, {
                 dryRun,
                 extraExcludeRules: gitIgnoredExcludeRules,
+                trigger,
             });
-            if (command.profilePreview)
-                this._log('debug', `${profile.name} profile preview:\n${command.profilePreview}`);
-            if (trigger === 'watch')
-                this._log('debug', `Checking watch sync for ${profile.name}: ${this._formatCommand(command)}`);
-            else
-                this._log('info', `Running ${trigger} sync for ${profile.name}: ${this._formatCommand(command)}`);
 
-            const processResult = await this._runProcess(command);
+            if (!processResult.ok &&
+                isTwoWayMode(profile.mode) &&
+                isUnisonArchiveCorruptionError(`${processResult.stdout}\n${processResult.stderr}`)) {
+                this._log(
+                    'warn',
+                    `${profile.name} has a corrupted Unison archive; rebuilding it with -ignorearchives and retrying.`
+                );
+                processResult = await this._runSyncCommand(profile, {
+                    dryRun,
+                    extraExcludeRules: gitIgnoredExcludeRules,
+                    trigger,
+                    ignoreArchives: true,
+                });
+            }
+
             const conflictSummary = this._detectConflictSummary(processResult);
             const finishedAt = new Date().toISOString();
             const hadVisibleChanges = didSyncProduceVisibleChanges(processResult);

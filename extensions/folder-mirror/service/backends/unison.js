@@ -8,6 +8,24 @@ import {
     normalizeProfileMode,
 } from '../../lib/validation.js';
 
+/**
+ * Detect Unison archive-loading failures so the daemon can rebuild the archive
+ * instead of failing the profile forever. Unison reports these as fatal errors
+ * such as "End_of_file exception raised in loading archive (this indicates a
+ * bug!)" or "input_value: bad object" when an archive file was truncated or
+ * written concurrently by another Unison process.
+ */
+export function isUnisonArchiveCorruptionError(output) {
+    const text = typeof output === 'string' ? output : '';
+    if (!text)
+        return false;
+
+    return /loading archive \(this indicates a bug!\)/iu.test(text) ||
+        /End_of_file exception/iu.test(text) ||
+        /input_value: bad object/iu.test(text) ||
+        /archive file .* (?:is )?(?:corrupt|not in the expected format)/iu.test(text);
+}
+
 export function buildUnisonConflictArguments(profile) {
     const policy = normalizeConflictPolicy(profile?.conflictPolicy);
 
@@ -30,6 +48,7 @@ export function buildUnisonProfilePreview(profile, {
     globalExcludes = [],
     extraExcludeRules = [],
     dryRun = false,
+    ignoreArchives = false,
 } = {}) {
     const effectiveExcludeRules = getEffectiveExcludeRules(
         profile.excludeRules,
@@ -49,6 +68,7 @@ export function buildUnisonProfilePreview(profile, {
         'terse = true',
         ...(profile.deleteProtection === false ? ['confirmbigdel = false'] : []),
         ...(dryRun ? ['dryrun = true'] : []),
+        ...(ignoreArchives ? ['ignorearchives = true'] : []),
     ];
 
     for (const rule of effectiveExcludeRules)
@@ -61,6 +81,7 @@ export function buildUnisonCommand(profile, {
     globalExcludes = [],
     extraExcludeRules = [],
     dryRun = false,
+    ignoreArchives = false,
 } = {}) {
     const mode = normalizeProfileMode(profile?.mode);
     if (!isTwoWayMode(mode))
@@ -96,6 +117,9 @@ export function buildUnisonCommand(profile, {
     if (dryRun)
         argv.push('-dryrun');
 
+    if (ignoreArchives)
+        argv.push('-ignorearchives');
+
     argv.push(...buildUnisonConflictArguments(profile));
 
     for (const rule of effectiveExcludeRules)
@@ -109,6 +133,7 @@ export function buildUnisonCommand(profile, {
             globalExcludes,
             extraExcludeRules,
             dryRun,
+            ignoreArchives,
         }),
     };
 }
