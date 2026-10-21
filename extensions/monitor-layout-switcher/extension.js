@@ -12,11 +12,25 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {
     DISPLAY_CONFIG_IFACE, DISPLAY_CONFIG_PATH, GET_STATE_REPLY_TYPE,
-    APPLY_METHOD_PERSISTENT,
-    renderedSize,
+    APPLY_METHOD_PERSISTENT, APPLY_METHOD_VERIFY,
     loadLayouts, saveLayouts,
-    parseLogicals, parseMonitors,
+    parseDisplayProperties, parseLogicals, parseMonitors,
 } from './shared.js';
+
+import {
+    COMPATIBILITY,
+    buildPlan,
+    createLayoutFromState,
+    describeDegraded,
+    describeLayoutCompatibility,
+    explainDbusError,
+    fitPreviewRects,
+    formatPlanError,
+    layoutMatchesState,
+    layoutPreviewRects,
+    statePreviewRects,
+    toLogicalMonitorTuples,
+} from './lib/display-plan.js';
 
 // ── Visual constants ─────────────────────────────────────────────────────────
 const CARD_WIDTH = 110;
@@ -29,6 +43,8 @@ const TOGGLE_LAST_TWO_LAYOUTS_KEY = 'toggle-last-two-layouts';
 const SWITCHER_CYCLE_DEDUP_WINDOW_US = 100 * 1000;
 const SWITCHER_SUPER_RELEASE_POLL_MS = 50;
 const SWITCHER_HINT_TEXT =
+    'F7 / ← / → cycle • Shift+F7 / ↑ / ↓ reverse • Enter apply • Esc cancel';
+const SWITCHER_HINT_TEXT_SUPER =
     'F7 / ← / → cycle • Shift+F7 / ↑ / ↓ reverse • release Super or Enter apply • Esc cancel';
 const SUPER_MODIFIER_MASK =
     (Clutter.ModifierType.SUPER_MASK ?? 0) |
@@ -45,24 +61,22 @@ async function getCurrentState() {
     const serial = result.get_child_value(0).get_uint32();
     const monitorsVariant = result.get_child_value(1);
     const logicalsVariant = result.get_child_value(2);
+    const propertiesVariant = result.get_child_value(3);
 
     const connLogical = parseLogicals(logicalsVariant);
-    const {monitors: monArray, activeExternals} =
+    const {monitors, activeExternals} =
         parseMonitors(monitorsVariant, connLogical);
+    const capabilities = parseDisplayProperties(propertiesVariant);
 
-    // extension.js uses a Map keyed by connector for quick lookups
-    const monitors = new Map();
-    for (const m of monArray)
-        monitors.set(m.connector, m);
-
-    return {serial, monitors, activeExternals};
+    return {serial, monitors, activeExternals, capabilities};
 }
 
 // ── DBus: apply monitor config (async) ───────────────────────────────────────
-async function applyConfig(serial, logicalMonitors) {
+async function applyConfig(serial, logicalMonitors,
+    method = APPLY_METHOD_PERSISTENT) {
     const params = new GLib.Variant('(uua(iiduba(ssa{sv}))a{sv})', [
         serial,
-        APPLY_METHOD_PERSISTENT,
+        method,
         logicalMonitors,
         {},
     ]);
@@ -72,17 +86,13 @@ async function applyConfig(serial, logicalMonitors) {
         Gio.DBusCallFlags.NONE, 5000, null);
 }
 
-function makeLogicalMonitor(x, y, scale, transform, isPrimary, connector, mode) {
-    return [x, y, scale, transform, isPrimary, [[connector, mode, {}]]];
-}
-
 function estimatePreviewWidth(labelText) {
     return Math.max(CARD_WIDTH, Math.min(240, 18 + String(labelText).length * 7));
 }
 
 // ── Layout card widget ───────────────────────────────────────────────────────
 
-function createLayoutCard(layoutDef, isActive, onActivate) {
+function createLayoutCard(layoutDef, isActive, onActivate, options = {}) {
     const card = new St.Button({
         style_class: isActive
             ? 'mls-layout-card mls-layout-card-active'
@@ -114,45 +124,48 @@ function createLayoutCard(layoutDef, isActive, onActivate) {
     });
     box.add_child(preview);
 
-    if (layoutDef.monitors && layoutDef.monitors.length > 0)
-        drawMonitorPreview(preview, layoutDef.monitors, previewWidth, CARD_HEIGHT);
+    if (layoutDef.monitors && layoutDef.monitors.length > 0) {
+        drawMonitorPreview(preview, layoutPreviewRects(layoutDef),
+            previewWidth, CARD_HEIGHT);
+    }
 
     box.add_child(label);
+
+    // Always add the badge label so every card in a row keeps the same height.
+    box.add_child(new St.Label({
+        text: options.badge ?? '',
+        style_class: options.badge
+            ? (options.unavailable
+                ? 'mls-layout-badge mls-layout-badge-error'
+                : 'mls-layout-badge')
+            : 'mls-layout-badge mls-layout-badge-empty',
+        x_align: Clutter.ActorAlign.CENTER,
+    }));
 
     card.connect('clicked', () => onActivate());
     return card;
 }
 
-function drawMonitorPreview(container, monitors, areaW, areaH) {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    const rects = monitors.map(mon => {
-        const raw = renderedSize(mon.mode, mon.transform);
-        const s = mon.scale || 1;
-        const w = Math.round(raw.w / s);
-        const h = Math.round(raw.h / s);
-        minX = Math.min(minX, mon.x);
-        minY = Math.min(minY, mon.y);
-        maxX = Math.max(maxX, mon.x + w);
-        maxY = Math.max(maxY, mon.y + h);
-        return {x: mon.x, y: mon.y, w, h, isPrimary: mon.isPrimary};
-    });
+// Summarise whether a layout can be applied on this session.
+function cardStatus(layout, state) {
+    const {status, label} = describeLayoutCompatibility(layout, state);
 
-    const totalW = maxX - minX || 1;
-    const totalH = maxY - minY || 1;
-    const availW = areaW - PREVIEW_PADDING * 2;
-    const availH = areaH - PREVIEW_PADDING * 2;
-    const scale = Math.min(availW / totalW, availH / totalH);
+    if (status === COMPATIBILITY.READY)
+        return {badge: null, unavailable: false};
 
-    const scaledW = totalW * scale;
-    const scaledH = totalH * scale;
-    const offsetX = PREVIEW_PADDING + (availW - scaledW) / 2;
-    const offsetY = PREVIEW_PADDING + (availH - scaledH) / 2;
+    return {
+        badge: label,
+        unavailable: status === COMPATIBILITY.UNAVAILABLE,
+    };
+}
 
-    for (const r of rects) {
-        const rx = offsetX + (r.x - minX) * scale;
-        const ry = offsetY + (r.y - minY) * scale;
-        const rw = Math.max(r.w * scale - MONITOR_GAP, 4);
-        const rh = Math.max(r.h * scale - MONITOR_GAP, 4);
+// Draw monitor rectangles scaled to fit the preview area.
+function drawMonitorPreview(container, rects, areaW, areaH) {
+    const prepared = fitPreviewRects(rects, areaW, areaH, PREVIEW_PADDING);
+
+    for (const r of prepared) {
+        const rw = Math.max(r.width - MONITOR_GAP, 4);
+        const rh = Math.max(r.height - MONITOR_GAP, 4);
 
         const rect = new St.Widget({
             style_class: r.isPrimary
@@ -161,91 +174,24 @@ function drawMonitorPreview(container, monitors, areaW, areaH) {
             width: Math.round(rw),
             height: Math.round(rh),
         });
-        rect.set_position(Math.round(rx), Math.round(ry));
+        rect.set_position(Math.round(r.x), Math.round(r.y));
         container.add_child(rect);
     }
 }
 
 // ── Saved-layout helpers ─────────────────────────────────────────────────────
 
-// Resolve saved connector names to current connector names.
-// Falls back to matching by model when connector names change (e.g. after reboot).
-function resolveConnectors(layoutMonitors, stateMonitors) {
-    const map = new Map();
-    const claimed = new Set();
-
-    // First pass: exact connector match
-    for (const lm of layoutMonitors) {
-        if (stateMonitors.has(lm.connector)) {
-            map.set(lm.connector, lm.connector);
-            claimed.add(lm.connector);
-        }
-    }
-
-    // Second pass: match remaining by model
-    for (const lm of layoutMonitors) {
-        if (map.has(lm.connector)) continue;
-        for (const [conn, cur] of stateMonitors) {
-            if (claimed.has(conn)) continue;
-            if (cur.model && cur.model === lm.model) {
-                map.set(lm.connector, conn);
-                claimed.add(conn);
-                break;
-            }
-        }
-    }
-
-    return map;
-}
-
-function currentMonitorsFromState(state) {
-    const monitors = [];
-    for (const [, m] of state.monitors) {
-        if (!m.active) continue;
-        monitors.push({
-            connector: m.connector,
-            mode: m.mode,
-            transform: m.transform,
-            scale: m.scale,
-            x: m.x,
-            y: m.y,
-            isPrimary: m.isPrimary,
-            model: m.model,
-            isBuiltin: m.isBuiltin,
-        });
-    }
-    return monitors;
-}
-
 async function snapshotCurrentLayout(name) {
     const state = await getCurrentState();
-    const monitors = currentMonitorsFromState(state);
-    return {id: `layout-${Date.now()}`, name, monitors};
-}
-
-function matchesCurrentState(layout, state) {
-    if (!Array.isArray(layout.monitors)) return false;
-    const activeConns = new Set();
-    for (const [conn, m] of state.monitors) {
-        if (m.active) activeConns.add(conn);
-    }
-    if (layout.monitors.length !== activeConns.size) return false;
-
-    const connMap = resolveConnectors(layout.monitors, state.monitors);
-    for (const lm of layout.monitors) {
-        const resolved = connMap.get(lm.connector);
-        if (!resolved) return false;
-        const cur = state.monitors.get(resolved);
-        if (!cur?.active) return false;
-        if (cur.x !== lm.x || cur.y !== lm.y) return false;
-        if (cur.transform !== lm.transform) return false;
-    }
-    return true;
+    return createLayoutFromState(state, {name});
 }
 
 function findMatchingLayout(layouts, state) {
+    if (!state)
+        return null;
+
     for (const layout of layouts) {
-        if (matchesCurrentState(layout, state))
+        if (layoutMatchesState(layout, state))
             return layout;
     }
 
@@ -324,35 +270,6 @@ function isSuperKey(keysym) {
     return keysym === Clutter.KEY_Super_L || keysym === Clutter.KEY_Super_R;
 }
 
-function resolveLayoutMonitors(layoutMonitors, stateMonitors) {
-    const connMap = resolveConnectors(layoutMonitors, stateMonitors);
-    const resolvedMonitors = [];
-
-    for (const lm of layoutMonitors) {
-        const resolved = connMap.get(lm.connector);
-        if (!resolved)
-            return {error: `Monitor ${lm.connector} not connected`};
-
-        const curMon = stateMonitors.get(resolved);
-        if (!curMon)
-            return {error: `Monitor ${lm.connector} not available`};
-
-        resolvedMonitors.push({
-            connector: resolved,
-            mode: curMon.allModeIds.includes(lm.mode) ? lm.mode : curMon.mode,
-            transform: lm.transform,
-            scale: lm.scale,
-            x: lm.x,
-            y: lm.y,
-            isPrimary: lm.isPrimary,
-            model: curMon.model,
-            isBuiltin: curMon.isBuiltin,
-        });
-    }
-
-    return {monitors: resolvedMonitors};
-}
-
 // ── Extension class ──────────────────────────────────────────────────────────
 export default class MonitorLayoutSwitcher extends Extension {
     enable() {
@@ -368,8 +285,10 @@ export default class MonitorLayoutSwitcher extends Extension {
         this._switcherSelectedIndex = -1;
         this._switcherMatchedLayout = null;
         this._switcherSelectedLabel = null;
+        this._switcherState = null;
         this._switcherOpening = false;
         this._switcherApplyInProgress = false;
+        this._switcherWaitForSuperRelease = false;
         this._switcherLastCycleUs = 0;
 
         this._registerKeybindings();
@@ -413,6 +332,9 @@ export default class MonitorLayoutSwitcher extends Extension {
     }
 
     disable() {
+        // Invalidate in-flight async builds so they cannot touch actors after
+        // the extension has been disabled.
+        this._buildSeq = (this._buildSeq ?? 0) + 1;
         this._destroyLayoutSwitcher();
         if (this._monitorChangedId !== undefined) {
             Gio.DBus.session.signal_unsubscribe(this._monitorChangedId);
@@ -459,12 +381,12 @@ export default class MonitorLayoutSwitcher extends Extension {
         }
     }
 
-    _getShortcutCycleDirection() {
+    _getShortcutModifiers() {
         try {
             const [, , modifiers] = global.get_pointer();
-            return getCycleDirectionFromState(modifiers);
+            return modifiers;
         } catch {
-            return 1;
+            return 0;
         }
     }
 
@@ -472,16 +394,25 @@ export default class MonitorLayoutSwitcher extends Extension {
         if (this._switcherApplyInProgress)
             return;
 
-        const direction = this._getShortcutCycleDirection();
+        const modifiers = this._getShortcutModifiers();
+        const direction = getCycleDirectionFromState(modifiers);
         if (this._switcherOverlay) {
             this._cycleLayoutSelection(direction);
             return;
         }
 
-        await this._showLayoutSwitcher(direction);
+        // Only wait for a Super release when the shortcut was actually pressed
+        // with Super held. A plain F7 binding must stay open until Enter/Esc.
+        const waitForSuperRelease = SUPER_MODIFIER_MASK !== 0 &&
+            (modifiers & SUPER_MODIFIER_MASK) !== 0;
+
+        await this._showLayoutSwitcher(direction, waitForSuperRelease);
     }
 
-    async _showLayoutSwitcher(direction = 1) {
+    async _showLayoutSwitcher(direction = 1, waitForSuperRelease = false) {
+        if (!this._settings)
+            return;
+
         if (this._switcherOpening || this._switcherOverlay || this._switcherApplyInProgress)
             return;
 
@@ -498,13 +429,20 @@ export default class MonitorLayoutSwitcher extends Extension {
             this._indicator?.menu?.close();
 
             let matchedLayout = null;
+            let currentState = null;
             try {
-                const state = await getCurrentState();
-                matchedLayout = findMatchingLayout(layouts, state);
+                currentState = await getCurrentState();
+                matchedLayout = findMatchingLayout(layouts, currentState);
             } catch (e) {
                 console.error(`[MLS] switcher state lookup failed: ${e.message}`);
             }
 
+            // The extension may have been disabled while reading the state.
+            if (!this._settings)
+                return;
+
+            this._switcherState = currentState;
+            this._switcherWaitForSuperRelease = waitForSuperRelease;
             this._switcherLayouts = orderSwitcherLayouts(layouts, matchedLayout);
             this._switcherMatchedLayout = matchedLayout;
             this._switcherSelectedIndex = getInitialSwitcherIndex(
@@ -603,7 +541,9 @@ export default class MonitorLayoutSwitcher extends Extension {
         panel.add_child(grid);
 
         panel.add_child(new St.Label({
-            text: SWITCHER_HINT_TEXT,
+            text: this._switcherWaitForSuperRelease
+                ? SWITCHER_HINT_TEXT_SUPER
+                : SWITCHER_HINT_TEXT,
             style_class: 'mls-switcher-hint',
             x_align: Clutter.ActorAlign.CENTER,
         }));
@@ -633,7 +573,8 @@ export default class MonitorLayoutSwitcher extends Extension {
 
         global.stage.set_key_focus(overlay);
         overlay.grab_key_focus();
-        this._startSwitcherSuperReleaseWatch();
+        if (this._switcherWaitForSuperRelease)
+            this._startSwitcherSuperReleaseWatch();
         this._renderLayoutSwitcherSelection();
     }
 
@@ -698,12 +639,16 @@ export default class MonitorLayoutSwitcher extends Extension {
         }
 
         this._switcherCards = this._switcherLayouts.map((layout, index) => {
+            const status = cardStatus(layout, this._switcherState);
             const card = createLayoutCard(layout, index === this._switcherSelectedIndex,
                 () => {
                     this._switcherSelectedIndex = index;
                     this._renderLayoutSwitcherSelection();
                     this._confirmLayoutSwitcherSelection().catch(e =>
                         console.error(`[MLS] switcher click apply failed: ${e.message}`));
+                }, {
+                    badge: status.badge,
+                    unavailable: status.unavailable,
                 });
             this._switcherGrid.add_child(card);
             return card;
@@ -782,6 +727,8 @@ export default class MonitorLayoutSwitcher extends Extension {
         this._switcherSelectedIndex = -1;
         this._switcherMatchedLayout = null;
         this._switcherSelectedLabel = null;
+        this._switcherState = null;
+        this._switcherWaitForSuperRelease = false;
         this._switcherLastCycleUs = 0;
     }
 
@@ -834,6 +781,9 @@ export default class MonitorLayoutSwitcher extends Extension {
     }
 
     async _buildMenu() {
+        if (!this._settings || !this._indicator)
+            return;
+
         this._buildSeq = (this._buildSeq ?? 0) + 1;
         const seq = this._buildSeq;
         const menu = this._indicator.menu;
@@ -846,12 +796,14 @@ export default class MonitorLayoutSwitcher extends Extension {
             console.error(`[MLS] getCurrentState failed: ${e.message}`);
         }
 
-        // A newer _buildMenu was started while we awaited — abort this one
-        if (seq !== this._buildSeq) return;
+        // A newer build started, or the extension was disabled while we
+        // awaited — abort so we never touch destroyed actors.
+        if (seq !== this._buildSeq || !this._settings || !this._indicator)
+            return;
 
         // ── Current layout section (top) ─────────────────────────────────
         const currentMonitors = currentState
-            ? currentMonitorsFromState(currentState) : [];
+            ? statePreviewRects(currentState) : [];
 
         // Find if current state matches a saved layout
         const matchedLayout = currentState
@@ -932,8 +884,12 @@ export default class MonitorLayoutSwitcher extends Extension {
             gridItem.add_child(grid);
 
             for (const layout of otherLayouts) {
+                const status = cardStatus(layout, currentState);
                 const card = createLayoutCard(layout, false, () => {
                     this._applyLayout(layout);
+                }, {
+                    badge: status.badge,
+                    unavailable: status.unavailable,
                 });
                 grid.add_child(card);
             }
@@ -989,38 +945,67 @@ export default class MonitorLayoutSwitcher extends Extension {
     async _applyLayout(layout, options = {}) {
         const {successMessage = layout.name} = options;
 
+        if (!this._settings)
+            return false;
+
         if (!Array.isArray(layout.monitors) || layout.monitors.length === 0) {
             Main.notify('Monitor Layout', 'Layout has no monitors');
             return false;
         }
 
+        let state;
         try {
-            const state = await getCurrentState();
-            const resolvedLayout = resolveLayoutMonitors(
-                layout.monitors,
-                state.monitors
-            );
-            if (resolvedLayout.error) {
-                Main.notify('Monitor Layout', resolvedLayout.error);
-                return false;
-            }
-
-            const logicals = resolvedLayout.monitors.map(lm =>
-                makeLogicalMonitor(
-                    lm.x, lm.y, lm.scale, lm.transform,
-                    lm.isPrimary, lm.connector, lm.mode
-                )
-            );
-
-            await applyConfig(state.serial, logicals);
-            if (successMessage)
-                Main.notify('Monitor Layout', successMessage);
-            return true;
+            state = await getCurrentState();
         } catch (e) {
-            console.error(`[MLS] apply failed: ${e.message}`);
-            Main.notify('Monitor Layout', `Error: ${e.message}`);
+            console.error(`[MLS] getCurrentState failed: ${e.message}`);
+            Main.notify('Monitor Layout',
+                `Could not read the display configuration: ${e.message}`);
             return false;
         }
+
+        const result = buildPlan(layout, state);
+        if (!result.ok) {
+            console.error(`[MLS] plan rejected: ${result.error.code} ` +
+                `${result.error.message}`);
+            Main.notify('Monitor Layout', formatPlanError(result.error, layout.name));
+            return false;
+        }
+
+        const logicals = toLogicalMonitorTuples(result.plan);
+
+        try {
+            // VERIFY lets Mutter run its own validation without touching the
+            // current configuration, so a bad plan never disturbs the session.
+            await applyConfig(state.serial, logicals, APPLY_METHOD_VERIFY);
+            await applyConfig(state.serial, logicals, APPLY_METHOD_PERSISTENT);
+        } catch (e) {
+            console.error(`[MLS] apply failed: ${e.message}`);
+            Main.notify('Monitor Layout', `Error: ${explainDbusError(e.message)}`);
+            return false;
+        }
+
+        const adjustment = describeDegraded(result.degraded);
+        // `null` means the post-apply state could not be read, so we must not
+        // claim the applied configuration differs from the plan.
+        let applied = null;
+        try {
+            const after = await getCurrentState();
+            applied = layoutMatchesState(layout, after);
+        } catch (e) {
+            console.error(`[MLS] post-apply read failed: ${e.message}`);
+        }
+
+        if (!successMessage)
+            return true;
+
+        if (applied === false)
+            Main.notify('Monitor Layout', `${successMessage} (applied with differences)`);
+        else if (adjustment)
+            Main.notify('Monitor Layout', `${successMessage} (${adjustment})`);
+        else
+            Main.notify('Monitor Layout', successMessage);
+
+        return true;
     }
 
     _onMonitorsChanged() {

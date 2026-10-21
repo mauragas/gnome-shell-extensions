@@ -152,6 +152,25 @@
     text-align: center;
 }
 
+/* ── Compatibility badge ───────────────────────────────────────────────── */
+.mls-layout-badge {
+    font-size: 9px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 8px;
+    color: rgba(255, 214, 130, 0.95);
+    background-color: rgba(255, 190, 80, 0.16);
+}
+
+.mls-layout-badge-error {
+    color: rgba(255, 150, 150, 0.95);
+    background-color: rgba(220, 80, 80, 0.18);
+}
+
+.mls-layout-badge-empty {
+    background-color: transparent;
+}
+
 /* ── Actions row ───────────────────────────────────────────────────────── */
 .mls-actions-row {
     spacing: 8px;

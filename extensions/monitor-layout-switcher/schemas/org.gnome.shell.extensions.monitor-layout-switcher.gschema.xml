@@ -3,22 +3,26 @@
   <schema id="org.gnome.shell.extensions.monitor-layout-switcher"
           path="/org/gnome/shell/extensions/monitor-layout-switcher/">
 
-    <!-- JSON array of layout objects. Each layout:
+    <!-- JSON array of schema v2 layout objects. Each layout:
          {
            "id": "unique-id",
            "name": "Human Label",
+           "schemaVersion": 2,
            "monitors": [
              {
-               "connector": "&lt;connector-name&gt;",
-               "mode": "&lt;mode-id&gt;",
+               "identity": {"vendor": "...", "product": "...", "serial": "..."},
+               "savedConnector": "&lt;connector-name&gt;",
+               "isBuiltin": false,
                "transform": 0,
                "scale": 1.0,
-               "x": 0,
-               "y": 0,
-               "isPrimary": true
+               "modeHint": {"width": 1920, "height": 1080, "rate": 60.0},
+               "savedModeId": "&lt;mode-id&gt;",
+               "preferredSize": {"width": 1920, "height": 1080},
+               "layout": {"x": 0, "y": 0, "isPrimary": true}
              }
            ]
          }
+         Schema v1 layouts are migrated in memory when loaded.
     -->
     <key name="layouts" type="s">
       <default>''</default>
